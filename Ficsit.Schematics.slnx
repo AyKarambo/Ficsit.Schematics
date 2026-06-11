@@ -1,3 +1,6 @@
 <Solution>
   <Project Path="Ficsit.Schematics.csproj" />
+  <Project Path="Ficsit.Schematics.Core\Ficsit.Schematics.Core.csproj" />
+  <Project Path="Ficsit.Schematics.Data\Ficsit.Schematics.Data.csproj" />
+  <Project Path="Ficsit.Schematics.Tests\Ficsit.Schematics.Tests.csproj" />
 </Solution>

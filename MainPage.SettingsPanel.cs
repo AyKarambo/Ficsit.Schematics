@@ -1,0 +1,125 @@
+using Ficsit.Schematics.Canvas;
+using Ficsit.Schematics.Core.Numerics;
+
+namespace Ficsit.Schematics;
+
+/// <summary>Settings panel handlers, theming, and the help/about dialogs.</summary>
+public partial class MainPage
+{
+    private async void OnLanguageChanged(object? sender, EventArgs e)
+    {
+        if (_initializing || LanguagePicker.SelectedIndex < 0) return;
+        var language = _languages[LanguagePicker.SelectedIndex];
+        _state.Settings.LanguageId = language.Id;
+        _state.Settings.LanguageName = language.Name;
+        _state.SaveSettings();
+        await _loc.LoadAsync(language.Id);
+        PopulateStaticPickers();
+        ApplyStrings();
+        Chooser.Refresh();
+        if (SummaryPanel.IsVisible) Summary.Refresh();
+        Canvas.Invalidate();
+        UpdateStatus();
+    }
+
+    private void OnDarkModeToggled(object? sender, ToggledEventArgs e)
+    {
+        if (_initializing) return;
+        _state.Settings.DarkMode = e.Value;
+        _state.SaveSettings();
+        ApplyTheme();
+    }
+
+    private void ApplyTheme()
+    {
+        if (Application.Current is { } app)
+            app.UserAppTheme = _state.Settings.DarkMode ? AppTheme.Dark : AppTheme.Light;
+        _drawable.Theme = _state.Settings.DarkMode ? CanvasTheme.Dark : CanvasTheme.Light;
+        Canvas.Invalidate();
+    }
+
+    private void OnDragSensitivityChanged(object? sender, EventArgs e)
+    {
+        if (_initializing) return;
+        if (int.TryParse(DragSensitivityEntry.Text, out var value) && value is > 0 and <= 200)
+        {
+            _state.Settings.DragSensitivity = value;
+            _state.SaveSettings();
+        }
+        ApplySettingsControls();
+    }
+
+    private void OnSolverChanged(object? sender, EventArgs e)
+    {
+        if (_initializing || SolverPicker.SelectedIndex < 0) return;
+        _state.Editor.Document.Solver = SolverIds[SolverPicker.SelectedIndex];
+        _state.Editor.Resolve();
+    }
+
+    private void OnPathStyleChanged(object? sender, EventArgs e)
+    {
+        if (_initializing || PathStylePicker.SelectedIndex < 0) return;
+        var path = PathIds[PathStylePicker.SelectedIndex];
+        _state.Editor.Document.Path = path;
+        _state.Settings.Path = path;
+        _state.SaveSettings();
+        Canvas.Invalidate();
+    }
+
+    private void OnMultiplierChanged(object? sender, EventArgs e)
+    {
+        if (_initializing) return;
+        var doc = _state.Editor.Document;
+        if (Rational.TryParse(SpaceElevatorMultEntry.Text?.Trim() ?? "", out _))
+            doc.SpaceElevatorMultiplier = SpaceElevatorMultEntry.Text!.Trim();
+        if (Rational.TryParse(InputMultEntry.Text?.Trim() ?? "", out _))
+            doc.InputMultiplier = InputMultEntry.Text!.Trim();
+        if (Rational.TryParse(PowerMultEntry.Text?.Trim() ?? "", out _))
+            doc.PowerMultiplier = PowerMultEntry.Text!.Trim();
+        ApplyDocumentControls();
+        _state.Editor.Resolve();
+    }
+
+    private void OnAutosaveToggled(object? sender, ToggledEventArgs e)
+    {
+        if (_initializing) return;
+        _state.Settings.Autosave = e.Value;
+        _state.SaveSettings();
+        _state.StartAutosave(Dispatcher);
+    }
+
+    private void OnAutosaveIntervalChanged(object? sender, EventArgs e)
+    {
+        if (_initializing) return;
+        if (int.TryParse(AutosaveIntervalEntry.Text, out var minutes) && minutes is > 0 and <= 240)
+        {
+            _state.Settings.AutosaveIntervalMinutes = minutes;
+            _state.SaveSettings();
+            _state.StartAutosave(Dispatcher);
+        }
+        ApplySettingsControls();
+    }
+
+    private async void OnHelpClicked(object? sender, EventArgs e)
+    {
+        await DisplayAlertAsync(_loc.L("HELP"),
+            "Double-click the canvas to add a machine.\n"
+            + "Drag from a part icon to a matching one to connect —\n"
+            + "or drop it on empty space to pick a matching recipe.\n"
+            + "Click a machine's bottom box to set a limit.\n"
+            + "Double-click or right-click a machine to edit it.\n"
+            + "Right-drag for box select · Del deletes the selection.\n"
+            + "Ctrl+Z/Y undo/redo · Ctrl+X/C/V clipboard · Ctrl+A select all\n"
+            + "Mouse wheel zooms · drag the background to pan · Ctrl+0 resets.",
+            "OK");
+    }
+
+    private async void OnAboutClicked(object? sender, EventArgs e)
+    {
+        await DisplayAlertAsync(_loc.L("ABOUT"),
+            "Ficsit Schematics 1.0\n\n"
+            + "A visual factory calculator for Satisfactory with exact fraction math.\n"
+            + "Inspired by Satisfactory Modeler; reads and writes its .sfmd saves.",
+            "OK");
+    }
+}

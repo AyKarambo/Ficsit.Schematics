@@ -2,7 +2,23 @@
   "permissions": {
     "allow": [
       "PowerShell(\\(Get-ChildItem \"X:\\\\source\\\\Ficsit.Schematics\\\\_reference\\\\satisfactory-modeler\\\\images\\\\icons\" -File\\).Count; \\(Get-ChildItem \"X:\\\\source\\\\Ficsit.Schematics\\\\_reference\\\\satisfactory-modeler\\\\images\\\\custom_icons\" -File\\).Count; \\(Get-ChildItem \"X:\\\\source\\\\Ficsit.Schematics\\\\_reference\\\\satisfactory-modeler\\\\images\\\\ui_icons\" -File\\).Count; Get-ChildItem \"X:\\\\source\\\\Ficsit.Schematics\\\\_reference\\\\satisfactory-modeler\\\\images\" -File | Format-Table Name; Get-ChildItem \"X:\\\\source\\\\Ficsit.Schematics\\\\_reference\\\\satisfactory-modeler\\\\images\\\\icons\" -File | Select-Object -First 15 Name)",
-      "PowerShell(\\(Get-ChildItem \"X:\\\\source\\\\Ficsit.Schematics\\\\_reference\\\\satisfactory-modeler\\\\images\" -File\\).Count; Get-ChildItem \"X:\\\\source\\\\Ficsit.Schematics\\\\_reference\\\\satisfactory-modeler\\\\images\\\\ui_icons\" -File | Format-Table Name; Get-ChildItem \"X:\\\\source\\\\Ficsit.Schematics\\\\_reference\\\\satisfactory-modeler\\\\images\\\\custom_icons\" -File | Format-Table Name)"
+      "PowerShell(\\(Get-ChildItem \"X:\\\\source\\\\Ficsit.Schematics\\\\_reference\\\\satisfactory-modeler\\\\images\" -File\\).Count; Get-ChildItem \"X:\\\\source\\\\Ficsit.Schematics\\\\_reference\\\\satisfactory-modeler\\\\images\\\\ui_icons\" -File | Format-Table Name; Get-ChildItem \"X:\\\\source\\\\Ficsit.Schematics\\\\_reference\\\\satisfactory-modeler\\\\images\\\\custom_icons\" -File | Format-Table Name)",
+      "PowerShell($j = Get-Content \"X:\\\\source\\\\Ficsit.Schematics\\\\_reference\\\\satisfactory-modeler\\\\game_data\\\\game_data.json\" -Raw | ConvertFrom-Json; $j.PSObject.Properties.Name; \"---\"; $j.PSObject.Properties | ForEach-Object { \"$\\($_.Name\\): $\\(if \\($_.Value -is [array]\\) { $_.Value.Count.ToString\\(\\) + ' entries' } else { $_.Value.GetType\\(\\).Name }\\) \" })",
+      "PowerShell($j = Get-Content \"X:\\\\source\\\\Ficsit.Schematics\\\\_reference\\\\satisfactory-modeler\\\\game_data\\\\game_data.json\" -Raw | ConvertFrom-Json; \"== Machine sample ==\"; $j.Machines[0..2] | ConvertTo-Json -Depth 6; \"== MultiMachines ==\"; $j.MultiMachines | ConvertTo-Json -Depth 6)",
+      "PowerShell($j = Get-Content \"X:\\\\source\\\\Ficsit.Schematics\\\\_reference\\\\satisfactory-modeler\\\\game_data\\\\game_data.json\" -Raw | ConvertFrom-Json; \"== Parts sample ==\"; $j.Parts[0..5] | ConvertTo-Json -Depth 5; \"== Recipes sample ==\"; $j.Recipes[0..3] | ConvertTo-Json -Depth 6)",
+      "PowerShell(New-Item *)",
+      "PowerShell(dotnet workload list *)",
+      "PowerShell(git *)",
+      "PowerShell(java *)",
+      "WebSearch",
+      "WebFetch(domain:satisfactorymodeler.github.io)",
+      "PowerShell(Get-ChildItem *)",
+      "PowerShell(curl.exe -sL -o \"X:\\\\source\\\\Ficsit.Schematics\\\\_reference\\\\jdk21.zip\" \"https://aka.ms/download-jdk/microsoft-jdk-21-windows-x64.zip\" && Expand-Archive -Path \"X:\\\\source\\\\Ficsit.Schematics\\\\_reference\\\\jdk21.zip\" -DestinationPath \"X:\\\\source\\\\Ficsit.Schematics\\\\_reference\\\\jdk21\" -Force && \\(Get-ChildItem \"X:\\\\source\\\\Ficsit.Schematics\\\\_reference\\\\jdk21\" -Directory\\).FullName)",
+      "PowerShell(Get-Process *)",
+      "PowerShell(Out-Null *)",
+      "PowerShell(Add-Type -AssemblyName System.Windows.Forms,System.Drawing,Microsoft.VisualBasic; [Microsoft.VisualBasic.Interaction]::AppActivate\\(39952\\); Start-Sleep -Seconds 3; $b = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds; $bmp = New-Object System.Drawing.Bitmap\\($b.Width, $b.Height\\); $g = [System.Drawing.Graphics]::FromImage\\($bmp\\); $g.CopyFromScreen\\($b.Location, [System.Drawing.Point]::Empty, $b.Size\\); $bmp.Save\\(\"X:\\\\source\\\\Ficsit.Schematics\\\\_reference\\\\screenshots\\\\02_main_window.png\"\\); $g.Dispose\\(\\); $bmp.Dispose\\(\\); \"saved\")",
+      "PowerShell(& \"X:\\\\source\\\\Ficsit.Schematics\\\\_reference\\\\capture.ps1\" -ProcId 39952 -OutFile \"X:\\\\source\\\\Ficsit.Schematics\\\\_reference\\\\screenshots\\\\03_main_window.png\")",
+      "PowerShell(dotnet test Ficsit.Schematics.Tests/Ficsit.Schematics.Tests.csproj --nologo -v q 2>&1)"
     ]
   }
 }
