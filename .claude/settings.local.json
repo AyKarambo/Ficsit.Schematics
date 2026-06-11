@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "PowerShell(\\(Get-ChildItem \"X:\\\\source\\\\Ficsit.Schematics\\\\_reference\\\\satisfactory-modeler\\\\images\\\\icons\" -File\\).Count; \\(Get-ChildItem \"X:\\\\source\\\\Ficsit.Schematics\\\\_reference\\\\satisfactory-modeler\\\\images\\\\custom_icons\" -File\\).Count; \\(Get-ChildItem \"X:\\\\source\\\\Ficsit.Schematics\\\\_reference\\\\satisfactory-modeler\\\\images\\\\ui_icons\" -File\\).Count; Get-ChildItem \"X:\\\\source\\\\Ficsit.Schematics\\\\_reference\\\\satisfactory-modeler\\\\images\" -File | Format-Table Name; Get-ChildItem \"X:\\\\source\\\\Ficsit.Schematics\\\\_reference\\\\satisfactory-modeler\\\\images\\\\icons\" -File | Select-Object -First 15 Name)",
+      "PowerShell(\\(Get-ChildItem \"X:\\\\source\\\\Ficsit.Schematics\\\\_reference\\\\satisfactory-modeler\\\\images\" -File\\).Count; Get-ChildItem \"X:\\\\source\\\\Ficsit.Schematics\\\\_reference\\\\satisfactory-modeler\\\\images\\\\ui_icons\" -File | Format-Table Name; Get-ChildItem \"X:\\\\source\\\\Ficsit.Schematics\\\\_reference\\\\satisfactory-modeler\\\\images\\\\custom_icons\" -File | Format-Table Name)"
+    ]
+  }
+}
