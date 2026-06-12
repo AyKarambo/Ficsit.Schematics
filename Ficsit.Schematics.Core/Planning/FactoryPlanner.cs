@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using Ficsit.Schematics.Core.GameData;
 using Ficsit.Schematics.Core.Numerics;
 using Ficsit.Schematics.Core.Saves;
@@ -21,7 +22,6 @@ public static class FactoryPlanner
 {
     private static readonly Rational SinkPenaltyEliminate = new(1_000_000);
     private static readonly Rational SinkPenaltyAllowed = new(1, 1_000_000);
-    private static readonly Rational TieBreakEpsilon = new(1, 1_000_000_000);
 
     public static PlanResult Plan(GameDatabase data, PlanRequest request, IReadOnlyList<ResourceNodeInfo>? mapNodes = null)
     {
@@ -32,20 +32,41 @@ public static class FactoryPlanner
         var exclusiveParts = request.Provisions.Where(p => p.Exclusive).Select(p => p.Part).ToHashSet();
         var recipes = CollectCandidateRecipes(data, request, exclusiveParts, out var parts);
 
-        var provisionByPart = request.Provisions
-            .GroupBy(p => p.Part)
-            .ToDictionary(
-                g => g.Key,
-                g => (Cap: g.Aggregate(Rational.Zero, (s, p) => s + p.MaxPerMinute),
-                      Exclusive: g.Any(p => p.Exclusive)));
-        foreach (var part in provisionByPart.Keys) parts.Add(part);
-        var targetByPart = request.Targets
-            .GroupBy(t => t.Part)
-            .ToDictionary(g => g.Key, g => g.Aggregate(Rational.Zero, (s, t) => s + t.Rate));
-        foreach (var part in targetByPart.Keys) parts.Add(part);
+        // Build provision map imperatively (no LINQ)
+        var provisionByPart = new Dictionary<string, (Rational Cap, bool Exclusive)>();
+        foreach (var provision in request.Provisions)
+        {
+            if (provisionByPart.TryGetValue(provision.Part, out var existing))
+            {
+                provisionByPart[provision.Part] = (
+                    existing.Cap + provision.MaxPerMinute,
+                    existing.Exclusive || provision.Exclusive
+                );
+            }
+            else
+            {
+                provisionByPart[provision.Part] = (provision.MaxPerMinute, provision.Exclusive);
+            }
+            parts.Add(provision.Part);
+        }
 
-        var partList = parts.OrderBy(p => p, StringComparer.Ordinal).ToList();
-        var partRow = partList.Select((p, i) => (p, i)).ToDictionary(x => x.p, x => x.i);
+        // Build target map imperatively (no LINQ)
+        var targetByPart = new Dictionary<string, Rational>();
+        foreach (var target in request.Targets)
+        {
+            if (targetByPart.TryGetValue(target.Part, out var existing))
+                targetByPart[target.Part] = existing + target.Rate;
+            else
+                targetByPart[target.Part] = target.Rate;
+            parts.Add(target.Part);
+        }
+
+        // Sort parts and build row index (imperative)
+        var partList = new List<string>(parts);
+        partList.Sort(StringComparer.Ordinal);
+        var partRow = new Dictionary<string, int>();
+        for (var i = 0; i < partList.Count; i++)
+            partRow[partList[i]] = i;
 
         // Targets scale together (bundle variable t) when maximizing, or when an
         // exclusive provision may bottleneck a fixed-rate request (t capped at 1).
@@ -59,10 +80,16 @@ public static class FactoryPlanner
 
         foreach (var recipe in recipes)
         {
-            columns.Add(recipe.Parts
-                .Where(p => partRow.ContainsKey(p.Part))
-                .Select(p => (partRow[p.Part], recipe.RatePerMinute(p.Part)))
-                .ToArray());
+            // Build column for this recipe imperatively
+            var columnEntries = new List<(int Row, Rational Coefficient)>();
+            foreach (var part in recipe.Parts)
+            {
+                if (partRow.TryGetValue(part.Part, out var row))
+                {
+                    columnEntries.Add((row, recipe.RatePerMinute(part.Part)));
+                }
+            }
+            columns.Add(columnEntries.ToArray());
             columnKinds.Add(('r', recipe.Name));
             costs.Add(RecipeCost(data, recipe, request.Bias));
         }
@@ -70,7 +97,15 @@ public static class FactoryPlanner
         // External supplies: extractable raws (always — Converter recipes can
         // also produce ores, so "has no producer" is not a safe test), true
         // leaf parts, and everything the user offered. Banned raws get none.
-        var producible = new HashSet<string>(recipes.SelectMany(r => r.Outputs.Select(o => o.Part)));
+        var producible = new HashSet<string>();
+        foreach (var recipe in recipes)
+        {
+            foreach (var output in recipe.Outputs)
+            {
+                producible.Add(output.Part);
+            }
+        }
+        var capRowBase = partList.Count;
         var capRows = new List<(string Part, Rational Cap)>();
         foreach (var part in partList)
         {
@@ -79,10 +114,19 @@ public static class FactoryPlanner
             if (request.BannedResources.Contains(part)) continue;
             if (!provided && (!isExternal || request.MaximizeFromProvisions)) continue;
 
-            columns.Add([(partRow[part], Rational.One)]);
+            // Capped supplies carry their cap-row entry inline so the column
+            // list fully describes the sparse matrix.
+            if (provided)
+            {
+                columns.Add([(partRow[part], Rational.One), (capRowBase + capRows.Count, Rational.One)]);
+                capRows.Add((part, provision.Cap));
+            }
+            else
+            {
+                columns.Add([(partRow[part], Rational.One)]);
+            }
             columnKinds.Add(('s', part));
             costs.Add(SupplyCost(part, provided, request.Bias, weights));
-            if (provided) capRows.Add((part, provision.Cap));
         }
 
         // Sinks for solid byproducts.
@@ -97,19 +141,25 @@ public static class FactoryPlanner
             costs.Add(sinkPenalty);
         }
 
+        var bundleCapRow = scaledTargetMode ? capRowBase + capRows.Count : -1;
+        var rowCount = partList.Count + capRows.Count + (scaledTargetMode ? 1 : 0);
+
         var bundleColumn = -1;
         if (hasBundle)
         {
             bundleColumn = costs.Count;
-            columns.Add(targetByPart.Select(t => (partRow[t.Key], -t.Value)).ToArray());
+            var bundleEntries = new (int Row, Rational Coefficient)[targetByPart.Count + (bundleCapRow >= 0 ? 1 : 0)];
+            var e = 0;
+            foreach (var (part, rate) in targetByPart)
+                bundleEntries[e++] = (partRow[part], -rate);
+            if (bundleCapRow >= 0)
+                bundleEntries[e] = (bundleCapRow, Rational.One); // t ≤ 1
+            columns.Add(bundleEntries);
             columnKinds.Add(('t', "bundle"));
             costs.Add(Rational.Zero); // bias cost; stage 1 overrides
         }
 
         // Slack columns for the cap rows (and for "t ≤ 1" in scaled target mode).
-        var capRowBase = partList.Count;
-        var bundleCapRow = -1;
-        var rowCount = partList.Count + capRows.Count + (scaledTargetMode ? 1 : 0);
         for (var i = 0; i < capRows.Count; i++)
         {
             columns.Add([(capRowBase + i, Rational.One)]);
@@ -118,52 +168,28 @@ public static class FactoryPlanner
         }
         if (scaledTargetMode)
         {
-            bundleCapRow = capRowBase + capRows.Count;
             columns.Add([(bundleCapRow, Rational.One)]);
             columnKinds.Add(('l', "bundle"));
             costs.Add(Rational.Zero);
         }
 
-        // ---- dense system (optionally with a pinned bundle value) --------
+        // ---- sparse system + revised simplex (warm-started stage 2) ------
         var n = costs.Count;
-        Rational[][] Assemble(Rational? pinnedBundle, out Rational[] b)
-        {
-            var extraRow = pinnedBundle is not null ? 1 : 0;
-            var a = new Rational[rowCount + extraRow][];
-            b = new Rational[rowCount + extraRow];
-            for (var i = 0; i < a.Length; i++)
-            {
-                a[i] = new Rational[n];
-                Array.Fill(a[i], Rational.Zero);
-                b[i] = Rational.Zero;
-            }
-            for (var j = 0; j < n; j++)
-            {
-                foreach (var (row, coefficient) in columns[j])
-                    a[row][j] = coefficient;
-                if (columnKinds[j].Kind == 's')
-                {
-                    var capIndex = capRows.FindIndex(c => c.Part == columnKinds[j].Name);
-                    if (capIndex >= 0) a[capRowBase + capIndex][j] = Rational.One;
-                }
-                if (columnKinds[j].Kind == 't' && bundleCapRow >= 0)
-                    a[bundleCapRow][j] = Rational.One;
-            }
+        var b = new Rational[rowCount];
+        Array.Fill(b, Rational.Zero);
+        if (!hasBundle)
             foreach (var (part, rate) in targetByPart)
-                b[partRow[part]] = hasBundle ? Rational.Zero : rate;
-            for (var i = 0; i < capRows.Count; i++)
-                b[capRowBase + i] = capRows[i].Cap;
-            if (bundleCapRow >= 0)
-                b[bundleCapRow] = Rational.One;
-            if (pinnedBundle is not null)
-            {
-                a[rowCount][bundleColumn] = Rational.One;
-                b[rowCount] = pinnedBundle.Value;
-            }
-            return a;
-        }
+                b[partRow[part]] = rate;
+        for (var i = 0; i < capRows.Count; i++)
+            b[capRowBase + i] = capRows[i].Cap;
+        if (bundleCapRow >= 0)
+            b[bundleCapRow] = Rational.One;
 
-        SimplexSolution solution;
+        var costArray = new Rational[n];
+        for (var j = 0; j < n; j++) costArray[j] = costs[j];
+
+        var baseMatrix = SparseMatrix.FromColumns(rowCount, columns);
+        RevisedSolveResult solution;
         var achieved = Rational.One;
         if (hasBundle)
         {
@@ -171,22 +197,33 @@ public static class FactoryPlanner
             var stage1Costs = new Rational[n];
             Array.Fill(stage1Costs, Rational.Zero);
             stage1Costs[bundleColumn] = -Rational.One;
-            var a1 = Assemble(null, out var b1);
-            var stage1 = RationalSimplex.Minimize(a1, b1, stage1Costs);
+            var stage1 = RevisedSimplexSolver.Minimize(baseMatrix, b, stage1Costs);
             if (stage1.Status != PlanStatus.Optimal)
                 return new PlanResult { Status = stage1.Status };
             achieved = stage1.Values[bundleColumn];
             if (!achieved.IsPositive)
                 return new PlanResult { Status = PlanStatus.Infeasible };
 
-            // Stage 2: best plan among those achieving it.
-            var a2 = Assemble(achieved, out var b2);
-            solution = RationalSimplex.Minimize(a2, b2, [.. costs]);
+            // Stage 2: pin the bundle with one extra row and warm-start from
+            // the stage-1 basis (block-extended B⁻¹) instead of a cold restart.
+            var bundleEntriesOld = columns[bundleColumn];
+            var pinnedEntries = new (int Row, Rational Coefficient)[bundleEntriesOld.Length + 1];
+            Array.Copy(bundleEntriesOld, pinnedEntries, bundleEntriesOld.Length);
+            pinnedEntries[^1] = (rowCount, Rational.One);
+            columns[bundleColumn] = pinnedEntries;
+
+            var extendedMatrix = SparseMatrix.FromColumns(rowCount + 1, columns);
+            var bExtended = new Rational[rowCount + 1];
+            Array.Copy(b, bExtended, rowCount);
+            bExtended[rowCount] = achieved;
+
+            solution = stage1.Snapshot is { } snapshot
+                ? RevisedSimplexSolver.MinimizeWarm(extendedMatrix, bExtended, costArray, snapshot, bundleColumn)
+                : RevisedSimplexSolver.Minimize(extendedMatrix, bExtended, costArray);
         }
         else
         {
-            var a = Assemble(null, out var b);
-            solution = RationalSimplex.Minimize(a, b, [.. costs]);
+            solution = RevisedSimplexSolver.Minimize(baseMatrix, b, costArray);
         }
         if (solution.Status != PlanStatus.Optimal)
             return new PlanResult { Status = solution.Status };
@@ -247,53 +284,127 @@ public static class FactoryPlanner
     private static List<RecipeDefinition> CollectCandidateRecipes(
         GameDatabase data, PlanRequest request, HashSet<string> exclusiveParts, out HashSet<string> parts)
     {
-        var eligible = data.Document.Recipes
-            .Where(r => r.Inputs.Any() && r.Outputs.Any()
-                && r.Machine != "Space Elevator"
-                && !r.Ficsmas
-                && (request.UseAlternateRecipes || !r.Alternate)
-                && !r.Outputs.Any(o => exclusiveParts.Contains(o.Part)))
-            .ToList();
+        // Filter eligible recipes (imperative loop, no LINQ in hot path)
+        var eligible = new List<RecipeDefinition>();
+        foreach (var recipe in data.Document.Recipes)
+        {
+            if (!recipe.Inputs.Any() || !recipe.Outputs.Any()) continue;
+            if (recipe.Machine == "Space Elevator") continue;
+            if (recipe.Ficsmas) continue;
+            if (!request.UseAlternateRecipes && recipe.Alternate) continue;
+
+            var hasExclusiveOutput = false;
+            foreach (var output in recipe.Outputs)
+            {
+                if (exclusiveParts.Contains(output.Part))
+                {
+                    hasExclusiveOutput = true;
+                    break;
+                }
+            }
+            if (hasExclusiveOutput) continue;
+
+            eligible.Add(recipe);
+        }
+
+        // Build producer map (imperative)
         var producers = new Dictionary<string, List<RecipeDefinition>>();
         foreach (var recipe in eligible)
+        {
             foreach (var output in recipe.Outputs)
             {
                 if (!producers.TryGetValue(output.Part, out var list))
                     producers[output.Part] = list = [];
                 list.Add(recipe);
             }
+        }
 
-        parts = [];
-        var included = new HashSet<string>();
-        var result = new List<RecipeDefinition>();
-        var queue = new Queue<string>(request.Targets.Select(t => t.Part));
-        while (queue.Count > 0)
+        // Level-synchronous parallel BFS: each depth level is expanded as one
+        // parallel pass into thread-local buffers (no shared queue, no cache
+        // line bouncing), merged once at the level barrier. Deduplication is
+        // lock-free via ConcurrentDictionary.TryAdd. Small frontiers run
+        // sequentially — for them the parallel machinery costs more than the
+        // work itself.
+        const int parallelThreshold = 32;
+        var seenParts = new ConcurrentDictionary<string, byte>();
+        var included = new ConcurrentDictionary<string, byte>();
+        var collected = new ConcurrentDictionary<string, RecipeDefinition>();
+
+        var frontier = new List<string>();
+        void Seed(string part)
         {
-            var part = queue.Dequeue();
-            if (!parts.Add(part)) continue;
-            if (!producers.TryGetValue(part, out var producingRecipes)) continue;
+            if (seenParts.TryAdd(part, 0)) frontier.Add(part);
+        }
+        foreach (var target in request.Targets) Seed(target.Part);
+        foreach (var provision in request.Provisions) Seed(provision.Part);
+
+        void Expand(string part, List<string> buffer)
+        {
+            if (!producers.TryGetValue(part, out var producingRecipes)) return;
             foreach (var recipe in producingRecipes)
             {
-                if (!included.Add(recipe.Name)) continue;
-                result.Add(recipe);
-                foreach (var p in recipe.Parts) queue.Enqueue(p.Part);
+                if (!included.TryAdd(recipe.Name, 0)) continue;
+                collected[recipe.Name] = recipe;
+                foreach (var reference in recipe.Parts)
+                    if (seenParts.TryAdd(reference.Part, 0))
+                        buffer.Add(reference.Part);
             }
         }
+
+        while (frontier.Count > 0)
+        {
+            var nextLevel = new List<string>();
+            if (frontier.Count < parallelThreshold)
+            {
+                foreach (var part in frontier) Expand(part, nextLevel);
+            }
+            else
+            {
+                Parallel.ForEach(
+                    frontier,
+                    static () => new List<string>(),
+                    (part, _, local) =>
+                    {
+                        Expand(part, local);
+                        return local;
+                    },
+                    local =>
+                    {
+                        if (local.Count == 0) return;
+                        lock (nextLevel) nextLevel.AddRange(local);
+                    });
+            }
+            frontier = nextLevel;
+        }
+
+        parts = new HashSet<string>(seenParts.Keys);
+
+        // Deterministic column order regardless of traversal interleaving:
+        // canonical game-data order (same plans on every run).
+        var dataOrder = new Dictionary<string, int>(data.Document.Recipes.Count);
+        for (var i = 0; i < data.Document.Recipes.Count; i++)
+            dataOrder[data.Document.Recipes[i].Name] = i;
+        var result = new List<RecipeDefinition>(collected.Count);
+        foreach (var recipe in collected.Values) result.Add(recipe);
+        result.Sort((x, y) => dataOrder[x.Name].CompareTo(dataOrder[y.Name]));
         return result;
     }
 
     private static Rational RecipeCost(GameDatabase data, RecipeDefinition recipe, PlanBias bias) => bias switch
     {
         PlanBias.Machines => Rational.One,
-        PlanBias.Power => PowerPerMachine(data, recipe) + TieBreakEpsilon,
+        PlanBias.Power => PowerPerMachine(data, recipe),
         _ => Rational.Zero,
     };
 
     private static Rational SupplyCost(string part, bool provided, PlanBias bias, Dictionary<string, Rational> weights)
     {
+        // Tie-break epsilons would be mathematically harmless but poison every
+        // reduced-cost fraction with huge denominators — exact arithmetic pays
+        // for them dearly. Bland's deterministic rule already makes results
+        // reproducible among equal-cost optima.
         if (provided) return Rational.Zero; // "use what I already have" is free
-        var weight = ScarcityWeights.WeightFor(weights, part);
-        return bias == PlanBias.Resources ? weight : weight * TieBreakEpsilon;
+        return bias == PlanBias.Resources ? ScarcityWeights.WeightFor(weights, part) : Rational.Zero;
     }
 
     /// <summary>Average MW one machine of this recipe consumes (0 for generators).</summary>
