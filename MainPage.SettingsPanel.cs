@@ -1,5 +1,6 @@
 using Ficsit.Schematics.Canvas;
 using Ficsit.Schematics.Core.Numerics;
+using Ficsit.Schematics.Core.Saves;
 
 namespace Ficsit.Schematics;
 
@@ -98,6 +99,38 @@ public partial class MainPage
             _state.StartAutosave(Dispatcher);
         }
         ApplySettingsControls();
+    }
+
+    /// <summary>
+    /// Reads resource nodes (ore nodes, geysers, resource wells) out of a
+    /// Satisfactory save and shows them on the world map for snapping.
+    /// </summary>
+    private async void OnImportSaveClicked(object? sender, EventArgs e)
+    {
+        try
+        {
+            var savType = new FilePickerFileType(new Dictionary<DevicePlatform, IEnumerable<string>>
+            {
+                [DevicePlatform.WinUI] = [".sav"],
+            });
+            var picked = await FilePicker.Default.PickAsync(new PickOptions
+            {
+                PickerTitle = "Satisfactory save (.sav)",
+                FileTypes = savType,
+            });
+            if (picked is null) return;
+
+            var nodes = await Task.Run(() => SatisfactorySaveReader.ReadResourceNodes(picked.FullPath));
+            _state.ImportMapNodes(nodes);
+            _state.Settings.ShowMap = true;
+            _state.SaveSettings();
+            UpdateMapButton();
+            Canvas.Invalidate();
+        }
+        catch (Exception ex)
+        {
+            await DisplayAlertAsync(_loc.L("ERROR"), ex.Message, "OK");
+        }
     }
 
     private async void OnHelpClicked(object? sender, EventArgs e)

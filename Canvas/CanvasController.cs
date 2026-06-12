@@ -1,4 +1,5 @@
 using Ficsit.Schematics.Core.Model;
+using Ficsit.Schematics.Core.Saves;
 using Ficsit.Schematics.Services;
 
 namespace Ficsit.Schematics.Canvas;
@@ -141,6 +142,7 @@ public sealed class CanvasController(AppState state, FactoryCanvasDrawable drawa
             case Mode.DragNodes:
                 state.Editor.Commands.BreakCoalescing();
                 SnapSelectionToGrid();
+                SnapToResourceNode();
                 break;
 
             case Mode.Connect:
@@ -392,6 +394,81 @@ public sealed class CanvasController(AppState state, FactoryCanvasDrawable drawa
         }
     }
 
+    /// <summary>
+    /// Map mode: a dropped extractor latches onto the nearest free, compatible
+    /// resource node — the marker's purity is applied as the machine capacity.
+    /// Dragging it away again releases the node.
+    /// </summary>
+    private void SnapToResourceNode()
+    {
+        if (!state.Settings.ShowMap || state.Editor.ScopePath.Count > 0) return;
+        if (state.Selection.Count != 1) return;
+        var node = state.Selection[0];
+        if (node.Kind != NodeKind.Recipe) return;
+
+        var center = NodeCenter(node);
+        ResourceNodeInfo? best = null;
+        var bestDistance = MapGeometry.SnapRadius;
+        var occupied = state.OccupiedResourceNodes();
+        foreach (var candidate in state.MapNodes)
+        {
+            if (!MatchesMapNode(node, candidate)) continue;
+            if (occupied.Contains(candidate.Instance) && node.ResourceNodeId != candidate.Instance) continue;
+            var p = MapGeometry.ToCanvas(candidate.X, candidate.Y);
+            var d = (float)Math.Sqrt((p.X - center.X) * (p.X - center.X) + (p.Y - center.Y) * (p.Y - center.Y));
+            if (d < bestDistance)
+            {
+                bestDistance = d;
+                best = candidate;
+            }
+        }
+
+        if (best is null)
+        {
+            if (node.ResourceNodeId is not null)
+                state.Editor.SetProperty(node, "Release node", n => n.ResourceNodeId, (n, v) => n.ResourceNodeId = v, (string?)null);
+            return;
+        }
+
+        var marker = MapGeometry.ToCanvas(best.X, best.Y);
+        state.Editor.MoveNodes([node],
+            marker.X - NodeLayout.CardWidth / 2 - node.X,
+            marker.Y - NodeLayout.ImageAreaHeight / 2 - node.Y,
+            coalesce: false);
+        if (node.ResourceNodeId != best.Instance)
+            state.Editor.SetProperty(node, "Snap to node", n => n.ResourceNodeId, (n, v) => n.ResourceNodeId = v, (string?)best.Instance);
+
+        // Adopt the node's purity when the machine family has purity capacities.
+        if (state.Data.RecipesByName.TryGetValue(node.Name, out var recipe))
+        {
+            var family = state.Data.MultiMachineFor(recipe.Machine);
+            if (family is not null && family.Capacities.Any(c => c.Name == best.Purity))
+                state.Editor.SetProperty(node, "Purity", n => n.Capacity, (n, v) => n.Capacity = v, (string?)best.Purity);
+        }
+        drawable.InvalidateLayouts();
+    }
+
+    /// <summary>Can this recipe machine sit on that map resource node?</summary>
+    private bool MatchesMapNode(FactoryNode node, ResourceNodeInfo map)
+    {
+        if (!state.Data.RecipesByName.TryGetValue(node.Name, out var recipe)) return false;
+        var family = state.Data.MultiMachineFor(recipe.Machine)?.Name ?? recipe.Machine;
+        return map.Kind switch
+        {
+            ResourceNodeKind.Geyser => family == "Geothermal Generator",
+            ResourceNodeKind.FrackingCore => recipe.Machine == "Resource Well Pressurizer",
+            ResourceNodeKind.FrackingSatellite => recipe.Machine == "Resource Well Extractor"
+                && recipe.Outputs.Any(o => o.Part == map.Part),
+            _ => (family == "Miner" || recipe.Machine == "Oil Extractor")
+                && recipe.Outputs.Any(o => o.Part == map.Part),
+        };
+    }
+
+    private PointF NodeCenter(FactoryNode node)
+        => drawable.Layouts.TryGetValue(node, out var layout)
+            ? layout.Bounds.Center
+            : new PointF((float)node.X + NodeLayout.CardWidth / 2, (float)node.Y + NodeLayout.ImageAreaHeight / 2);
+
     private void SnapSelectionToGrid()
     {
         if (!state.Settings.UseBuildingGrid) return;
@@ -461,6 +538,18 @@ public sealed class CanvasController(AppState state, FactoryCanvasDrawable drawa
         {
             var flow = state.Editor.Result.FlowOf(connection);
             return $"{loc.L(connection.Part)}: {numbers.ValueTooltip(flow)} {loc.L("PER_MINUTE")}";
+        }
+
+        // Map mode: hovering a resource node shows what it is and who uses it.
+        var mapNode = drawable.HitMapNode(world);
+        if (mapNode is not null)
+        {
+            var label = $"{loc.L(mapNode.Part)} · {loc.L(mapNode.Purity)}";
+            var occupant = state.OccupantOf(mapNode.Instance);
+            if (occupant is null)
+                return $"{label} — {loc.L("UNUSED")}";
+            var rate = state.Editor.Result.For(occupant).DisplayValue;
+            return $"{label} — {loc.L(occupant.Name)}: {numbers.Value(rate)}/min";
         }
         return null;
     }

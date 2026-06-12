@@ -74,6 +74,8 @@ public static class SfmdSerializer
             if (node.ShowPpm is not null) obj["Ppm"] = node.ShowPpm.Value;
             if (node.MachineVariant is not null) obj["Machine"] = node.MachineVariant;
             if (node.Capacity is not null) obj["Capacity"] = node.Capacity;
+            // Our extension (map mode); the reference app ignores unknown keys.
+            if (node.ResourceNodeId is not null) obj["ResourceNode"] = node.ResourceNodeId;
             if (node.Kind == NodeKind.StorageContainer && node.StorageMode != StorageMode.PartiallyFull)
                 obj["Mode"] = StorageModeName(node.StorageMode);
 
@@ -153,6 +155,7 @@ public static class SfmdSerializer
                 AutoRound = obj["AutoRound"]?.GetValue<bool>() ?? false,
                 MachineVariant = obj["Machine"]?.GetValue<string>(),
                 Capacity = obj["Capacity"]?.GetValue<string>(),
+                ResourceNodeId = obj["ResourceNode"]?.GetValue<string>(),
             };
 
             if (obj["Ppm"] is JsonValue ppm) node.ShowPpm = ppm.GetValue<bool>();

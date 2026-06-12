@@ -29,6 +29,9 @@ public sealed class AppSettings
     /// <summary>Connection style: Curves | Direct | 2D.</summary>
     public string Path { get; set; } = "Curves";
 
+    /// <summary>Render the world map (with imported resource nodes) behind the canvas.</summary>
+    public bool ShowMap { get; set; }
+
     public int DragSensitivity { get; set; } = 25;
 
     public bool Autosave { get; set; } = true;

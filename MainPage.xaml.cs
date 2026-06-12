@@ -78,6 +78,11 @@ public partial class MainPage : ContentPage
             if (SummaryPanel.IsVisible) Summary.Refresh();
             Canvas.Invalidate();
         };
+        _state.MapNodesChanged += () =>
+        {
+            UpdateMapNodesInfo();
+            Canvas.Invalidate();
+        };
 
         ApplyTheme();
         ApplyViewFromScope();
@@ -224,6 +229,12 @@ public partial class MainPage : ContentPage
         SaveAsButton.Text = _loc.L("SAVE");
         BackupsHeader.Text = _loc.L("AUTO_SAVE").ToUpperInvariant();
 
+        ToolTipProperties.SetText(MapButton, "World map");
+        SettingsMapHeader.Text = "MAP";
+        ImportSaveButton.Text = "Import resource nodes from game save (.sav)…";
+        UpdateMapButton();
+        UpdateMapNodesInfo();
+
         UpdateScopePill();
     }
 
@@ -342,6 +353,24 @@ public partial class MainPage : ContentPage
         SummaryPanel.IsVisible = !SummaryPanel.IsVisible;
         if (SummaryPanel.IsVisible) Summary.Refresh();
     }
+
+    private void OnMapToggleClicked(object? sender, EventArgs e)
+    {
+        _state.Settings.ShowMap = !_state.Settings.ShowMap;
+        _state.SaveSettings();
+        UpdateMapButton();
+        Canvas.Invalidate();
+    }
+
+    private void UpdateMapButton()
+        => MapButton.TextColor = _state.Settings.ShowMap
+            ? CanvasTheme.Accent
+            : (Color)(IsDark() ? Color.FromArgb("#E6E6E6") : Color.FromArgb("#333333"));
+
+    private void UpdateMapNodesInfo()
+        => MapNodesInfo.Text = _state.MapNodes.Count > 0
+            ? $"{_state.MapNodes.Count} resource nodes loaded"
+            : "No game save imported yet";
 
     private void OnScopeBackClicked(object? sender, EventArgs e) => _state.Editor.LeaveOutpost();
 

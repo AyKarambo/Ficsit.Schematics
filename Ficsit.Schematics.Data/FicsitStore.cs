@@ -1,4 +1,5 @@
 using Ficsit.Schematics.Core.Model;
+using Ficsit.Schematics.Core.Saves;
 using Ficsit.Schematics.Core.Serialization;
 using LiteDB;
 
@@ -92,6 +93,19 @@ public sealed class FicsitStore : IDisposable
     {
         var doc = Backups.FindById(id);
         return doc?["factory"] is BsonDocument factory ? FromBson(factory) : null;
+    }
+
+    // -------------------------------------------------------------- map nodes
+
+    /// <summary>Resource nodes imported from a Satisfactory save (map mode).</summary>
+    public IReadOnlyList<ResourceNodeInfo> LoadMapNodes()
+        => _db.GetCollection<ResourceNodeInfo>("mapnodes").FindAll().OrderBy(n => n.Id).ToList();
+
+    public void SaveMapNodes(IReadOnlyList<ResourceNodeInfo> nodes)
+    {
+        var collection = _db.GetCollection<ResourceNodeInfo>("mapnodes");
+        collection.DeleteAll();
+        collection.InsertBulk(nodes);
     }
 
     // --------------------------------------------------------------- settings

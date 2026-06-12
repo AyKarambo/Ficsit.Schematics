@@ -41,6 +41,22 @@ public sealed class IconStore
         return image;
     }
 
+    /// <summary>Arbitrary raw asset as a drawable image, e.g. "map/world_map.jpg".</summary>
+    public IImage? GetAsset(string assetPath)
+    {
+        var key = "asset:" + assetPath;
+        if (_images.TryGetValue(key, out var cached)) return cached;
+        IImage? image = null;
+        try
+        {
+            using var stream = FileSystem.OpenAppPackageFileAsync(assetPath).GetAwaiter().GetResult();
+            image = PlatformImage.FromStream(stream);
+        }
+        catch { }
+        _images[key] = image;
+        return image;
+    }
+
     /// <summary>UI icon from ui_icons/, e.g. "somersloop".</summary>
     public IImage? GetUiImage(string baseName)
     {

@@ -70,6 +70,15 @@ screenshots only document features.
     chooser pre-filtered to compatible recipes — consumers of the part when dragging from an
     output, producers when dragging from an input — and the chosen machine is placed at the
     drop point and auto-connected.
+- **Map mode (our addition)**: toggleable world-map background (1 canvas unit = 1 m; map
+  bounds X −324 699…425 302 cm, Y ±375 000 cm). Resource nodes (ore nodes, geysers, resource
+  wells incl. randomized-node game modes) are imported from a Satisfactory `.sav`
+  (`SatisfactorySaveReader`: zlib chunk decompression + surgical actor-header/property scans,
+  validated against save version 60). Dropped miners/extractors/pressurizers/geothermals snap
+  to the nearest free compatible node, adopt its purity as capacity, and mark it occupied
+  (accent marker); hovering a marker shows part · purity · occupant extraction rate, so spare
+  vs. saturated nodes are visible at a glance. Node assignments persist via an optional
+  `ResourceNode` key on .sfmd nodes (ignored by the reference app).
 - **Add machine**: double-click (or right-click) empty canvas → **Recipe Chooser** popup at the
   cursor: search field with three match toggles (**Recipe Name / Inputs / Outputs**), left
   column of specialty machines, right column of recipes (icon + localized name), scrollable,

@@ -1,6 +1,7 @@
 using Ficsit.Schematics.Core.Editing;
 using Ficsit.Schematics.Core.GameData;
 using Ficsit.Schematics.Core.Model;
+using Ficsit.Schematics.Core.Saves;
 using Ficsit.Schematics.Data;
 
 namespace Ficsit.Schematics.Services;
@@ -20,8 +21,12 @@ public sealed class AppState : IDisposable
 
     public List<FactoryNode> Selection { get; } = [];
 
+    /// <summary>Resource nodes imported from a Satisfactory save, for map mode.</summary>
+    public IReadOnlyList<ResourceNodeInfo> MapNodes { get; private set; } = [];
+
     public event Action? SelectionChanged;
     public event Action? SettingsChanged;
+    public event Action? MapNodesChanged;
 
     public AppState(GameDatabase data, FicsitStore store)
     {
@@ -32,7 +37,27 @@ public sealed class AppState : IDisposable
 
         var current = store.LoadCurrent();
         if (current is not null) Editor.LoadDocument(current);
+        MapNodes = store.LoadMapNodes();
     }
+
+    public void ImportMapNodes(IReadOnlyList<ResourceNodeInfo> nodes)
+    {
+        MapNodes = nodes;
+        _store.SaveMapNodes(nodes);
+        MapNodesChanged?.Invoke();
+    }
+
+    /// <summary>The factory node occupying a map resource node, if any.</summary>
+    public FactoryNode? OccupantOf(string resourceNodeId)
+        => Editor.Document.Root.AllNodes()
+            .FirstOrDefault(n => n.ResourceNodeId == resourceNodeId);
+
+    /// <summary>Ids of all occupied map nodes (one pass; for per-frame rendering).</summary>
+    public HashSet<string> OccupiedResourceNodes()
+        => Editor.Document.Root.AllNodes()
+            .Where(n => n.ResourceNodeId is not null)
+            .Select(n => n.ResourceNodeId!)
+            .ToHashSet();
 
     public void SetSelection(IEnumerable<FactoryNode> nodes)
     {

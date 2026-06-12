@@ -44,6 +44,12 @@ public sealed class FactoryNode
 
     public StorageMode StorageMode { get; set; } = StorageMode.PartiallyFull;
 
+    /// <summary>
+    /// Map-mode anchor: the save-file instance path of the resource node this
+    /// extractor is snapped to; null when unassigned. (Our extension to .sfmd.)
+    /// </summary>
+    public string? ResourceNodeId { get; set; }
+
     /// <summary>Nested canvas for outposts/blueprints.</summary>
     public FactoryGraph? Children { get; set; }
 
