@@ -12,4 +12,5 @@ public sealed class FICSMASWreath : PartBase
     public override string PartName => "FICSMAS Wreath";
     public override string Tier => "3-3";
     public override int SinkPoints => 630;
+    public override bool IsManuallyGathered => true;
 }

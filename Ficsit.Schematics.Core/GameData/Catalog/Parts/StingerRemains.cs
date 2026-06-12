@@ -11,4 +11,5 @@ public sealed class StingerRemains : PartBase
     public override int SortIndex => 13;
     public override string PartName => "Stinger Remains";
     public override string Tier => "0-0";
+    public override bool IsManuallyGathered => true;
 }

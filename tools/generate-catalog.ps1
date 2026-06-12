@@ -29,7 +29,19 @@ function Prop($obj, [string]$name) {
 
 function New-CatalogDir([string]$sub) {
     $dir = Join-Path $catalogRoot $sub
-    if (Test-Path $dir) { Remove-Item "$dir\*.cs" -Force }
+    if (Test-Path $dir) {
+        # Remove all generated .cs files recursively
+        Get-ChildItem $dir -Filter '*.cs' -Recurse | Remove-Item -Force
+        # Remove empty subdirectories
+        Get-ChildItem $dir -Directory -Recurse | Sort-Object -Property FullName -Descending |
+            Where-Object { (Get-ChildItem $_.FullName).Count -eq 0 } | Remove-Item -Force
+    }
+    New-Item -ItemType Directory -Force $dir | Out-Null
+    return $dir
+}
+
+function New-SubDir([string]$parent, [string]$sub) {
+    $dir = Join-Path $parent $sub
     New-Item -ItemType Directory -Force $dir | Out-Null
     return $dir
 }
@@ -52,20 +64,278 @@ function Unique([hashtable]$used, [string]$name) {
     return $candidate
 }
 
+# Map category name -> base class name
+$categoryBase = @{
+    'Extractors'  = 'ExtractorBase'
+    'Generators'  = 'GeneratorBase'
+    'Smelting'    = 'SmelterBase'
+    'Production'  = 'ProductionBase'
+    'Storage'     = 'StorageBase'
+    'Special'     = 'SpecialBase'
+}
+
+# Map category name -> namespace subfolder name
+$categoryFolder = @{
+    'Extractors'  = 'Extractors'
+    'Generators'  = 'Generators'
+    'Smelting'    = 'Smelting'
+    'Production'  = 'Production'
+    'Storage'     = 'Storage'
+    'Special'     = 'Special'
+}
+
+# Which base classes have family surface (FamilySortIndex, ShowPpm, etc.)
+$familyBases = @('ExtractorBase', 'GeneratorBase', 'StorageBase', 'SpecialBase')
+
 # ------------------------------------------------------------------ machines
-$dir = New-CatalogDir 'Machines'
-$used = @{}
+# First, build lookup structures.
+
+# Index machines by name
+$machineByName = @{}
 for ($i = 0; $i -lt $data.Machines.Count; $i++) {
     $m = $data.Machines[$i]
+    $machineByName[$m.Name] = @{ Machine = $m; SortIndex = $i }
+}
+
+# Index multimachines by name; also build reverse map: variant machine name -> family name
+$familyByName   = @{}   # MultiMachine.Name -> MultiMachine object
+$familySortIdx  = @{}   # MultiMachine.Name -> its index in MultiMachines array
+$variantOfFamily = @{}  # machine variant name -> family name (for Miner Mk.1/2/3 -> "Miner")
+
+for ($i = 0; $i -lt $data.MultiMachines.Count; $i++) {
+    $mm = $data.MultiMachines[$i]
+    $familyByName[$mm.Name] = $mm
+    $familySortIdx[$mm.Name] = $i
+    $variants = Prop $mm 'Machines'
+    if ($variants -and $variants.Count -gt 0) {
+        foreach ($v in $variants) {
+            $variantOfFamily[$v.Name] = $mm.Name
+        }
+    }
+}
+
+# Determine which machine names have already been emitted (to avoid duplicates
+# for Miner Mk.1/2/3 which collapse into a single Miner class)
+$emittedFamilies = @{}   # family name -> $true (prevents emitting Miner twice)
+$skippedMachines = @{}   # variant machine names that are subsumed by their family
+
+foreach ($variantName in $variantOfFamily.Keys) {
+    $skippedMachines[$variantName] = $true
+}
+
+# ------------------------------------------------------------------ machines section
+$machinesRoot = New-CatalogDir 'Machines'
+
+# Also delete legacy MultiMachines folder if it exists
+$multiMachinesDir = Join-Path $catalogRoot 'MultiMachines'
+if (Test-Path $multiMachinesDir) {
+    Remove-Item $multiMachinesDir -Recurse -Force
+    "Deleted MultiMachines/ folder"
+}
+
+$used = @{}
+$machineCount = 0
+
+for ($i = 0; $i -lt $data.Machines.Count; $i++) {
+    $m = $data.Machines[$i]
+    $cat = Prop $m 'Category'
+    if (-not $cat) { throw "Machine '$($m.Name)' has no Category in game_data.json." }
+    if (-not $categoryBase.ContainsKey($cat)) { throw "Unknown category '$cat' on machine '$($m.Name)'." }
+
+    $baseClass = $categoryBase[$cat]
+    $folder = $categoryFolder[$cat]
+    $catDir = New-SubDir $machinesRoot $folder
+    $nsBase = "Ficsit.Schematics.Core.GameData.Catalog.Machines.$folder"
+
+    if ($skippedMachines.ContainsKey($m.Name)) {
+        # This machine is a variant inside a family (e.g. Miner Mk.2).
+        # It will be emitted as part of the family class. Skip standalone.
+        # Emit the family class when we encounter the FIRST variant.
+        $familyName = $variantOfFamily[$m.Name]
+        if ($emittedFamilies.ContainsKey($familyName)) { continue }
+        $emittedFamilies[$familyName] = $true
+
+        $mm = $familyByName[$familyName]
+        $familyIdx = $familySortIdx[$familyName]
+        $cls = Unique $used (Sanitize $familyName)
+
+        # Collect per-variant machine data
+        $variants = Prop $mm 'Machines'
+
+        $sb = [System.Text.StringBuilder]::new()
+        [void]$sb.AppendLine("namespace $nsBase;")
+        [void]$sb.AppendLine('')
+        [void]$sb.AppendLine("public sealed class $cls : $baseClass")
+        [void]$sb.AppendLine('{')
+        # SortIndex = first variant's SortIndex (for machine-list ordering)
+        $firstVariantSortIdx = $machineByName[$variants[0].Name].SortIndex
+        [void]$sb.AppendLine("    public override int SortIndex => $firstVariantSortIdx;")
+        [void]$sb.AppendLine("    public override string MachineName => `"$(Esc $familyName)`";")
+        # Tier from the first variant machine
+        $firstMachine = $machineByName[$variants[0].Name].Machine
+        [void]$sb.AppendLine("    public override string Tier => `"$(Esc $firstMachine.Tier)`";")
+
+        # Family sort index
+        if ($familyBases -contains $baseClass) {
+            [void]$sb.AppendLine("    public override int FamilySortIndex => $familyIdx;")
+        }
+
+        # Family surface: ShowPpm, AutoRound, DefaultMax
+        if ((Prop $mm 'ShowPpm') -eq $true)  { [void]$sb.AppendLine('    public override bool ShowPpm => true;') }
+        if ((Prop $mm 'AutoRound') -eq $false) { [void]$sb.AppendLine('    public override bool AutoRound => false;') }
+        $defaultMax = Prop $mm 'DefaultMax'
+        if ($null -ne $defaultMax -and "$defaultMax" -ne '') {
+            [void]$sb.AppendLine("    public override string DefaultMax => `"$(Esc "$defaultMax")`";")
+        }
+
+        # FamilyMachines (variant list)
+        [void]$sb.AppendLine('')
+        [void]$sb.AppendLine('    public override IReadOnlyList<MultiMachineVariant> FamilyMachines =>')
+        [void]$sb.AppendLine('    [')
+        foreach ($v in $variants) {
+            $parts = @("Name = `"$(Esc $v.Name)`"")
+            $ratio = Prop $v 'PartsRatio'
+            if ($null -ne $ratio) { $parts += "PartsRatio = `"$(Esc "$ratio")`"" }
+            if ((Prop $v 'Default') -eq $true) { $parts += 'Default = true' }
+            [void]$sb.AppendLine("        new() { $($parts -join ', ') },")
+        }
+        [void]$sb.AppendLine('    ];')
+
+        # FamilyCapacities
+        $capacities = Prop $mm 'Capacities'
+        if ($capacities -and $capacities.Count -gt 0) {
+            [void]$sb.AppendLine('')
+            [void]$sb.AppendLine('    public override IReadOnlyList<MultiMachineCapacity> FamilyCapacities =>')
+            [void]$sb.AppendLine('    [')
+            foreach ($c in $capacities) {
+                $cparts = @("Name = `"$(Esc $c.Name)`"")
+                $ratio = Prop $c 'PartsRatio'
+                if ($null -ne $ratio) { $cparts += "PartsRatio = `"$(Esc "$ratio")`"" }
+                $power = Prop $c 'PowerRatio'
+                if ($null -ne $power) { $cparts += "PowerRatio = `"$(Esc "$power")`"" }
+                if ((Prop $c 'Default') -eq $true) { $cparts += 'Default = true' }
+                $color = Prop $c 'Color'
+                if ($null -ne $color) { $cparts += "Color = $color" }
+                [void]$sb.AppendLine("        new() { $($cparts -join ', ') },")
+            }
+            [void]$sb.AppendLine('    ];')
+        }
+
+        # ToIndexedMachineDefinitions: one per variant with its original SortIndex
+        # so GameDataCatalog can restore the canonical interleaved ordering.
+        [void]$sb.AppendLine('')
+        [void]$sb.AppendLine('    public override IEnumerable<(int SortIndex, MachineDefinition Definition)> ToIndexedMachineDefinitions() =>')
+        [void]$sb.AppendLine('    [')
+        foreach ($v in $variants) {
+            $vm = $machineByName[$v.Name]
+            $vMachine = $vm.Machine
+            $vIdx = $vm.SortIndex
+            $vName = Esc $v.Name
+            $vTier = Esc $vMachine.Tier
+
+            # Build cost list
+            $vCost = Prop $vMachine 'Cost'
+            if ($vCost -and $vCost.Count -gt 0) {
+                $costItems = ($vCost | ForEach-Object { "new() { Part = `"$(Esc $_.Part)`", Amount = `"$(Esc "$($_.Amount)")`" }" }) -join ', '
+                $costExpr = "[$costItems]"
+            } else {
+                $costExpr = "[]"
+            }
+
+            # Power fields
+            $powerParts = @()
+            foreach ($field in 'AveragePower', 'MinPower', 'BasePower', 'BasePowerBoost', 'FueledBasePowerBoost', 'OverclockPowerExponent', 'ProductionShardMultiplier', 'ProductionShardPowerExponent') {
+                $v2 = Prop $vMachine $field
+                if ($null -ne $v2 -and "$v2" -ne '') {
+                    $powerParts += "$field = `"$(Esc "$v2")`""
+                }
+            }
+            $shards = Prop $vMachine 'MaxProductionShards'
+            if ($shards) { $powerParts += "MaxProductionShards = $shards" }
+            $powerParts += "Cost = $costExpr"
+
+            [void]$sb.AppendLine("        ($vIdx, new() { Name = `"$vName`", Tier = `"$vTier`", $($powerParts -join ', ') }),")
+        }
+        [void]$sb.AppendLine('    ];')
+
+        # ToFamilyDefinition
+        [void]$sb.AppendLine('')
+        [void]$sb.AppendLine("    public override MultiMachineDefinition ToFamilyDefinition() => new()")
+        [void]$sb.AppendLine('    {')
+        [void]$sb.AppendLine("        Name = `"$(Esc $familyName)`",")
+        if ((Prop $mm 'ShowPpm') -eq $true)  { [void]$sb.AppendLine('        ShowPpm = true,') }
+        if ((Prop $mm 'AutoRound') -eq $false) { [void]$sb.AppendLine('        AutoRound = false,') }
+        if ($null -ne $defaultMax -and "$defaultMax" -ne '') {
+            [void]$sb.AppendLine("        DefaultMax = `"$(Esc "$defaultMax")`",")
+        }
+        # Machines list for family def
+        [void]$sb.AppendLine('        Machines =')
+        [void]$sb.AppendLine('        [')
+        foreach ($v in $variants) {
+            $vparts = @("Name = `"$(Esc $v.Name)`"")
+            $ratio = Prop $v 'PartsRatio'
+            if ($null -ne $ratio) { $vparts += "PartsRatio = `"$(Esc "$ratio")`"" }
+            if ((Prop $v 'Default') -eq $true) { $vparts += 'Default = true' }
+            [void]$sb.AppendLine("            new() { $($vparts -join ', ') },")
+        }
+        [void]$sb.AppendLine('        ],')
+        # Capacities list for family def
+        if ($capacities -and $capacities.Count -gt 0) {
+            [void]$sb.AppendLine('        Capacities =')
+            [void]$sb.AppendLine('        [')
+            foreach ($c in $capacities) {
+                $cparts = @("Name = `"$(Esc $c.Name)`"")
+                $ratio = Prop $c 'PartsRatio'
+                if ($null -ne $ratio) { $cparts += "PartsRatio = `"$(Esc "$ratio")`"" }
+                $power = Prop $c 'PowerRatio'
+                if ($null -ne $power) { $cparts += "PowerRatio = `"$(Esc "$power")`"" }
+                if ((Prop $c 'Default') -eq $true) { $cparts += 'Default = true' }
+                $color = Prop $c 'Color'
+                if ($null -ne $color) { $cparts += "Color = $color" }
+                [void]$sb.AppendLine("            new() { $($cparts -join ', ') },")
+            }
+            [void]$sb.AppendLine('        ],')
+        }
+        [void]$sb.AppendLine('    };')
+
+        [void]$sb.AppendLine('}')
+        Save-Class $catDir $cls $sb.ToString()
+        $machineCount++
+        continue
+    }
+
+    # Check if this machine IS a family (self-referential: its name matches a MultiMachine name)
+    $isSelfFamily = $familyByName.ContainsKey($m.Name)
+
     $cls = Unique $used (Sanitize $m.Name)
     $sb = [System.Text.StringBuilder]::new()
-    [void]$sb.AppendLine('namespace Ficsit.Schematics.Core.GameData.Catalog.Machines;')
+    [void]$sb.AppendLine("namespace $nsBase;")
     [void]$sb.AppendLine('')
-    [void]$sb.AppendLine("public sealed class $cls : MachineBase")
+    [void]$sb.AppendLine("public sealed class $cls : $baseClass")
     [void]$sb.AppendLine('{')
     [void]$sb.AppendLine("    public override int SortIndex => $i;")
     [void]$sb.AppendLine("    public override string MachineName => `"$(Esc $m.Name)`";")
     [void]$sb.AppendLine("    public override string Tier => `"$(Esc $m.Tier)`";")
+
+    if ($isSelfFamily) {
+        $mm = $familyByName[$m.Name]
+        $familyIdx = $familySortIdx[$m.Name]
+
+        # Family sort index
+        if ($familyBases -contains $baseClass) {
+            [void]$sb.AppendLine("    public override int FamilySortIndex => $familyIdx;")
+        }
+
+        # Family surface
+        if ((Prop $mm 'ShowPpm') -eq $true)  { [void]$sb.AppendLine('    public override bool ShowPpm => true;') }
+        if ((Prop $mm 'AutoRound') -eq $false) { [void]$sb.AppendLine('    public override bool AutoRound => false;') }
+        $defaultMax = Prop $mm 'DefaultMax'
+        if ($null -ne $defaultMax -and "$defaultMax" -ne '') {
+            [void]$sb.AppendLine("    public override string DefaultMax => `"$(Esc "$defaultMax")`";")
+        }
+    }
+
+    # Standard machine fields
     foreach ($field in 'AveragePower', 'MinPower', 'BasePower', 'BasePowerBoost', 'FueledBasePowerBoost', 'OverclockPowerExponent', 'ProductionShardMultiplier', 'ProductionShardPowerExponent') {
         $v = Prop $m $field
         if ($null -ne $v -and "$v" -ne '') {
@@ -84,64 +354,66 @@ for ($i = 0; $i -lt $data.Machines.Count; $i++) {
         }
         [void]$sb.AppendLine('    ];')
     }
-    [void]$sb.AppendLine('}')
-    Save-Class $dir $cls $sb.ToString()
-}
-"machines: $($data.Machines.Count)"
 
-# ------------------------------------------------------------- multimachines
-$dir = New-CatalogDir 'MultiMachines'
-$used = @{}
-for ($i = 0; $i -lt $data.MultiMachines.Count; $i++) {
-    $m = $data.MultiMachines[$i]
-    $cls = Unique $used ((Sanitize $m.Name) + 'Family')
-    $sb = [System.Text.StringBuilder]::new()
-    [void]$sb.AppendLine('namespace Ficsit.Schematics.Core.GameData.Catalog.MultiMachines;')
-    [void]$sb.AppendLine('')
-    [void]$sb.AppendLine("public sealed class $cls : MultiMachineBase")
-    [void]$sb.AppendLine('{')
-    [void]$sb.AppendLine("    public override int SortIndex => $i;")
-    [void]$sb.AppendLine("    public override string FamilyName => `"$(Esc $m.Name)`";")
-    if ((Prop $m 'ShowPpm') -eq $true) { [void]$sb.AppendLine('    public override bool ShowPpm => true;') }
-    if ((Prop $m 'AutoRound') -eq $false) { [void]$sb.AppendLine('    public override bool AutoRound => false;') }
-    $defaultMax = Prop $m 'DefaultMax'
-    if ($defaultMax) { [void]$sb.AppendLine("    public override string DefaultMax => `"$(Esc "$defaultMax")`";") }
-    $variants = Prop $m 'Machines'
-    if ($variants -and $variants.Count -gt 0) {
-        [void]$sb.AppendLine('')
-        [void]$sb.AppendLine('    public override IReadOnlyList<MultiMachineVariant> Machines =>')
-        [void]$sb.AppendLine('    [')
-        foreach ($v in $variants) {
-            $parts = @("Name = `"$(Esc $v.Name)`"")
-            $ratio = Prop $v 'PartsRatio'
-            if ($null -ne $ratio) { $parts += "PartsRatio = `"$(Esc "$ratio")`"" }
-            if ((Prop $v 'Default') -eq $true) { $parts += 'Default = true' }
-            [void]$sb.AppendLine("        new() { $($parts -join ', ') },")
+    if ($isSelfFamily) {
+        $mm = $familyByName[$m.Name]
+        $capacities = Prop $mm 'Capacities'
+
+        # FamilyCapacities override
+        if ($capacities -and $capacities.Count -gt 0) {
+            [void]$sb.AppendLine('')
+            [void]$sb.AppendLine('    public override IReadOnlyList<MultiMachineCapacity> FamilyCapacities =>')
+            [void]$sb.AppendLine('    [')
+            foreach ($c in $capacities) {
+                $cparts = @("Name = `"$(Esc $c.Name)`"")
+                $ratio = Prop $c 'PartsRatio'
+                if ($null -ne $ratio) { $cparts += "PartsRatio = `"$(Esc "$ratio")`"" }
+                $power = Prop $c 'PowerRatio'
+                if ($null -ne $power) { $cparts += "PowerRatio = `"$(Esc "$power")`"" }
+                if ((Prop $c 'Default') -eq $true) { $cparts += 'Default = true' }
+                $color = Prop $c 'Color'
+                if ($null -ne $color) { $cparts += "Color = $color" }
+                [void]$sb.AppendLine("        new() { $($cparts -join ', ') },")
+            }
+            [void]$sb.AppendLine('    ];')
         }
-        [void]$sb.AppendLine('    ];')
-    }
-    $capacities = Prop $m 'Capacities'
-    if ($capacities -and $capacities.Count -gt 0) {
+
+        # ToFamilyDefinition
+        $familyName = $m.Name
+        $defaultMax = Prop $mm 'DefaultMax'
         [void]$sb.AppendLine('')
-        [void]$sb.AppendLine('    public override IReadOnlyList<MultiMachineCapacity> Capacities =>')
-        [void]$sb.AppendLine('    [')
-        foreach ($c in $capacities) {
-            $parts = @("Name = `"$(Esc $c.Name)`"")
-            $ratio = Prop $c 'PartsRatio'
-            if ($null -ne $ratio) { $parts += "PartsRatio = `"$(Esc "$ratio")`"" }
-            $power = Prop $c 'PowerRatio'
-            if ($null -ne $power) { $parts += "PowerRatio = `"$(Esc "$power")`"" }
-            if ((Prop $c 'Default') -eq $true) { $parts += 'Default = true' }
-            $color = Prop $c 'Color'
-            if ($null -ne $color) { $parts += "Color = $color" }
-            [void]$sb.AppendLine("        new() { $($parts -join ', ') },")
+        [void]$sb.AppendLine("    public override MultiMachineDefinition ToFamilyDefinition() => new()")
+        [void]$sb.AppendLine('    {')
+        [void]$sb.AppendLine("        Name = `"$(Esc $familyName)`",")
+        if ((Prop $mm 'ShowPpm') -eq $true)  { [void]$sb.AppendLine('        ShowPpm = true,') }
+        if ((Prop $mm 'AutoRound') -eq $false) { [void]$sb.AppendLine('        AutoRound = false,') }
+        if ($null -ne $defaultMax -and "$defaultMax" -ne '') {
+            [void]$sb.AppendLine("        DefaultMax = `"$(Esc "$defaultMax")`",")
         }
-        [void]$sb.AppendLine('    ];')
+        if ($capacities -and $capacities.Count -gt 0) {
+            [void]$sb.AppendLine('        Capacities =')
+            [void]$sb.AppendLine('        [')
+            foreach ($c in $capacities) {
+                $cparts = @("Name = `"$(Esc $c.Name)`"")
+                $ratio = Prop $c 'PartsRatio'
+                if ($null -ne $ratio) { $cparts += "PartsRatio = `"$(Esc "$ratio")`"" }
+                $power = Prop $c 'PowerRatio'
+                if ($null -ne $power) { $cparts += "PowerRatio = `"$(Esc "$power")`"" }
+                if ((Prop $c 'Default') -eq $true) { $cparts += 'Default = true' }
+                $color = Prop $c 'Color'
+                if ($null -ne $color) { $cparts += "Color = $color" }
+                [void]$sb.AppendLine("            new() { $($cparts -join ', ') },")
+            }
+            [void]$sb.AppendLine('        ],')
+        }
+        [void]$sb.AppendLine('    };')
     }
+
     [void]$sb.AppendLine('}')
-    Save-Class $dir $cls $sb.ToString()
+    Save-Class $catDir $cls $sb.ToString()
+    $machineCount++
 }
-"multimachines: $($data.MultiMachines.Count)"
+"machines emitted: $machineCount"
 
 # --------------------------------------------------------------------- parts
 $dir = New-CatalogDir 'Parts'
@@ -160,19 +432,59 @@ for ($i = 0; $i -lt $data.Parts.Count; $i++) {
     $sink = Prop $p 'SinkPoints'
     if ($sink) { [void]$sb.AppendLine("    public override int SinkPoints => $sink;") }
     if ((Prop $p 'Fluid') -eq $true) { [void]$sb.AppendLine('    public override bool Fluid => true;') }
+    if ((Prop $p 'IsManuallyGathered') -eq $true) { [void]$sb.AppendLine('    public override bool IsManuallyGathered => true;') }
     [void]$sb.AppendLine('}')
     Save-Class $dir $cls $sb.ToString()
 }
 "parts: $($data.Parts.Count)"
 
 # ------------------------------------------------------------------- recipes
-$dir = New-CatalogDir 'Recipes'
+# Build machine folder map: machine name -> folder path
+# Family variant names map to the family folder
+$machineFolderMap = @{}
+
+# Standalone machines and self-family machines
+for ($i = 0; $i -lt $data.Machines.Count; $i++) {
+    $m = $data.Machines[$i]
+    $cat = Prop $m 'Category'
+    if (-not $cat) { throw "Machine '$($m.Name)' has no Category in game_data.json." }
+    $folder = Sanitize $m.Name
+    $machineFolderMap[$m.Name] = $folder
+}
+
+# For variant machines (Miner Mk.1/2/3), override to family name
+foreach ($variantName in $variantOfFamily.Keys) {
+    $familyName = $variantOfFamily[$variantName]
+    $machineFolderMap[$variantName] = Sanitize $familyName
+}
+
+# MultiMachine names that are self-referential also need to map to their sanitized name
+# (already covered above since they have machine entries)
+
+$recipesRoot = New-CatalogDir 'Recipes'
 $used = @{}
 for ($i = 0; $i -lt $data.Recipes.Count; $i++) {
     $r = $data.Recipes[$i]
+    $machineName = $r.Machine
+
+    # Resolve machine folder
+    if (-not $machineFolderMap.ContainsKey($machineName)) {
+        # Also check family names directly (e.g. "Miner" as machine name)
+        if ($familyByName.ContainsKey($machineName)) {
+            $folder = Sanitize $machineName
+        } else {
+            throw "Recipe '$($r.Name)' references machine '$machineName' which has no folder. Add the machine to game_data.json."
+        }
+    } else {
+        $folder = $machineFolderMap[$machineName]
+    }
+
+    $machineDir = New-SubDir $recipesRoot $folder
+    $ns = "Ficsit.Schematics.Core.GameData.Catalog.Recipes.$folder"
+
     $cls = Unique $used (Sanitize $r.Name)
     $sb = [System.Text.StringBuilder]::new()
-    [void]$sb.AppendLine('namespace Ficsit.Schematics.Core.GameData.Catalog.Recipes;')
+    [void]$sb.AppendLine("namespace $ns;")
     [void]$sb.AppendLine('')
     [void]$sb.AppendLine("public sealed class $cls : RecipeBase")
     [void]$sb.AppendLine('{')
@@ -205,6 +517,6 @@ for ($i = 0; $i -lt $data.Recipes.Count; $i++) {
         [void]$sb.AppendLine('    ];')
     }
     [void]$sb.AppendLine('}')
-    Save-Class $dir $cls $sb.ToString()
+    Save-Class $machineDir $cls $sb.ToString()
 }
 "recipes: $($data.Recipes.Count)"

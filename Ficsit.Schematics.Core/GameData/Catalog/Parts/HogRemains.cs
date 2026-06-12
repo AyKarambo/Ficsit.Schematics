@@ -11,4 +11,5 @@ public sealed class HogRemains : PartBase
     public override int SortIndex => 8;
     public override string PartName => "Hog Remains";
     public override string Tier => "0-0";
+    public override bool IsManuallyGathered => true;
 }

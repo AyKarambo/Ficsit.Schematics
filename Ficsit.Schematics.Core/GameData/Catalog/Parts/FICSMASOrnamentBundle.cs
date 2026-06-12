@@ -12,4 +12,5 @@ public sealed class FICSMASOrnamentBundle : PartBase
     public override string PartName => "FICSMAS Ornament Bundle";
     public override string Tier => "3-3";
     public override int SinkPoints => 100;
+    public override bool IsManuallyGathered => true;
 }

@@ -12,4 +12,5 @@ public sealed class FICSMASGift : PartBase
     public override string PartName => "FICSMAS Gift";
     public override string Tier => "0-3";
     public override int SinkPoints => 1;
+    public override bool IsManuallyGathered => true;
 }

@@ -11,4 +11,5 @@ public sealed class SpitterRemains : PartBase
     public override int SortIndex => 12;
     public override string PartName => "Spitter Remains";
     public override string Tier => "0-0";
+    public override bool IsManuallyGathered => true;
 }

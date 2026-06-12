@@ -11,4 +11,5 @@ public sealed class Somersloop : PartBase
     public override int SortIndex => 11;
     public override string PartName => "Somersloop";
     public override string Tier => "0-0";
+    public override bool IsManuallyGathered => true;
 }

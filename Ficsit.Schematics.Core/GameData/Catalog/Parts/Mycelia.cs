@@ -12,4 +12,5 @@ public sealed class Mycelia : PartBase
     public override string PartName => "Mycelia";
     public override string Tier => "0-0";
     public override int SinkPoints => 10;
+    public override bool IsManuallyGathered => true;
 }

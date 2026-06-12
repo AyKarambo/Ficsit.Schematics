@@ -12,4 +12,5 @@ public sealed class FICSMASTreeBranch : PartBase
     public override string PartName => "FICSMAS Tree Branch";
     public override string Tier => "0-3";
     public override int SinkPoints => 2;
+    public override bool IsManuallyGathered => true;
 }

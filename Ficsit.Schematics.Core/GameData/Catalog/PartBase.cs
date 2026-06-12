@@ -19,11 +19,20 @@ public abstract class PartBase
 
     public virtual bool Fluid => false;
 
+    /// <summary>
+    /// True for parts that must be collected by hand in-game (Leaves, Wood,
+    /// Mycelia, alien remains, power slugs, FICSMAS drops, etc.).  Generated
+    /// classes override this when <c>"IsManuallyGathered": true</c> is present
+    /// in game_data.json.
+    /// </summary>
+    public virtual bool IsManuallyGathered => false;
+
     public PartDefinition ToDefinition() => new()
     {
         Name = PartName,
         Tier = Tier,
         SinkPoints = SinkPoints,
         Fluid = Fluid,
+        IsManuallyGathered = IsManuallyGathered,
     };
 }

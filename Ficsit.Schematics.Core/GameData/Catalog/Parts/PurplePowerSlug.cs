@@ -11,4 +11,5 @@ public sealed class PurplePowerSlug : PartBase
     public override int SortIndex => 10;
     public override string PartName => "Purple Power Slug";
     public override string Tier => "0-0";
+    public override bool IsManuallyGathered => true;
 }

@@ -12,4 +12,5 @@ public sealed class FICSMASActualSnow : PartBase
     public override string PartName => "FICSMAS Actual Snow";
     public override string Tier => "0-3";
     public override int SinkPoints => 5;
+    public override bool IsManuallyGathered => true;
 }

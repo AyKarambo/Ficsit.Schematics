@@ -12,4 +12,5 @@ public sealed class Leaves : PartBase
     public override string PartName => "Leaves";
     public override string Tier => "0-0";
     public override int SinkPoints => 3;
+    public override bool IsManuallyGathered => true;
 }

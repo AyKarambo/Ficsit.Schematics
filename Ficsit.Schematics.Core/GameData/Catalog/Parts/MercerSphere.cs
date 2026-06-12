@@ -11,4 +11,5 @@ public sealed class MercerSphere : PartBase
     public override int SortIndex => 9;
     public override string PartName => "Mercer Sphere";
     public override string Tier => "0-0";
+    public override bool IsManuallyGathered => true;
 }

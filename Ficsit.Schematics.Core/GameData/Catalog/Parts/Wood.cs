@@ -12,4 +12,5 @@ public sealed class Wood : PartBase
     public override string PartName => "Wood";
     public override string Tier => "0-0";
     public override int SinkPoints => 30;
+    public override bool IsManuallyGathered => true;
 }

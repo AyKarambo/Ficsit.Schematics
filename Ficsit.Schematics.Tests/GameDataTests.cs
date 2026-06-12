@@ -49,7 +49,7 @@ public class GameDataTests
                 .ToList(),
 
             Parts = db.Document.Parts
-                .Select(p => new { p.Name, p.Tier, p.SinkPoints, p.Fluid })
+                .Select(p => new { p.Name, p.Tier, p.SinkPoints, p.Fluid, p.IsManuallyGathered })
                 .ToList(),
 
             Recipes = db.Document.Recipes

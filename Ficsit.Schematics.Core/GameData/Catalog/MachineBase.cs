@@ -55,4 +55,28 @@ public abstract class MachineBase
         ProductionShardPowerExponent = ProductionShardPowerExponent,
         Cost = Cost.ToList(),
     };
+
+    /// <summary>
+    /// All <see cref="MachineDefinition"/>s contributed by this class, each
+    /// paired with its canonical sort key.  For standalone machines this is just
+    /// <c>[(SortIndex, ToDefinition())]</c>.  Merged family classes override
+    /// this to emit one pair per variant, each with its original SortIndex.
+    /// </summary>
+    public virtual IEnumerable<(int SortIndex, MachineDefinition Definition)> ToIndexedMachineDefinitions()
+        => [(SortIndex, ToDefinition())];
+
+    /// <summary>
+    /// All <see cref="MachineDefinition"/>s contributed by this class.  For
+    /// standalone machines this is just the single <see cref="ToDefinition()"/>;
+    /// merged family classes override this to emit one definition per variant.
+    /// </summary>
+    public virtual IEnumerable<MachineDefinition> ToMachineDefinitions()
+        => [ToDefinition()];
+
+    /// <summary>
+    /// The <see cref="MultiMachineDefinition"/> contributed by this class, or
+    /// <c>null</c> if this machine has no family (the common case).  Merged
+    /// family classes override this to emit their family definition.
+    /// </summary>
+    public virtual MultiMachineDefinition? ToFamilyDefinition() => null;
 }

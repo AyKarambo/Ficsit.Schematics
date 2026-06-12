@@ -11,4 +11,5 @@ public sealed class HatcherRemains : PartBase
     public override int SortIndex => 7;
     public override string PartName => "Hatcher Remains";
     public override string Tier => "0-0";
+    public override bool IsManuallyGathered => true;
 }

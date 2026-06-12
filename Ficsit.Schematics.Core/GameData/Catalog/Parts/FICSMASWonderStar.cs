@@ -12,4 +12,5 @@ public sealed class FICSMASWonderStar : PartBase
     public override string PartName => "FICSMAS Wonder Star";
     public override string Tier => "3-3";
     public override int SinkPoints => 6540;
+    public override bool IsManuallyGathered => true;
 }
