@@ -70,6 +70,21 @@ screenshots only document features.
     chooser pre-filtered to compatible recipes — consumers of the part when dragging from an
     output, producers when dragging from an input — and the chosen machine is placed at the
     drop point and auto-connected.
+- **Auto-Plan (our addition)**: the user picks any target parts via a searchable part picker
+  with rates (or provides input caps and maximizes a bundle — Space Elevator phases ship as
+  presets). Provided inputs cover intermediates too ("I already make Heavy Modular Frames")
+  with a per-row lock: locked = the supply is all there is — its producers are excluded and
+  an undersupply scales the whole output down proportionally (two-stage LP: maximize the
+  achievable fraction, then optimize the bias at that fraction; bottlenecks are reported);
+  unlocked = the planner builds extra production for any shortfall. Users pick a bias
+  (resource- / power- / machine-efficient), bans raw resources, and chooses byproduct
+  handling (eliminate = recycle to zero waste, or allow AWESOME-Sink disposal). The planner
+  is an exact-rational two-phase simplex (`Core/Planning/`): one variable per candidate
+  recipe / external supply / sink, a balance row per part; raw supplies are priced by
+  scarcity (classic-map totals, or rebuilt from imported map nodes). Recipe cycles work,
+  which is what makes zero-waste oil loops plannable — the canonical 300-oil → 900-plastic
+  build is a regression test. The result materializes on the canvas: nodes per recipe with
+  exact machine-count limits, wired part-wise, laid out in dependency layers.
 - **Map mode (our addition)**: toggleable world-map background (1 canvas unit = 1 m; map
   bounds X −324 699…425 302 cm, Y ±375 000 cm). Resource nodes (ore nodes, geysers, resource
   wells incl. randomized-node game modes) are imported from a Satisfactory `.sav`

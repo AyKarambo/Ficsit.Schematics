@@ -179,6 +179,7 @@
                 <BoxView Style="{StaticResource Divider}" />
                 <Button x:Name="SummaryButton" Style="{StaticResource IconButton}" Text="&#xE9D2;" Clicked="OnSummaryToggleClicked" />
                 <Button x:Name="MapButton" Style="{StaticResource IconButton}" Text="&#xE774;" Clicked="OnMapToggleClicked" />
+                <Button x:Name="AutoPlanButton" Style="{StaticResource IconButton}" Text="&#xE945;" Clicked="OnAutoPlanClicked" />
             </HorizontalStackLayout>
         </Border>
 
@@ -498,6 +499,74 @@
                     <VerticalStackLayout x:Name="BackupsList" Spacing="4" />
                 </ScrollView>
             </VerticalStackLayout>
+        </Border>
+
+        <!-- ====================== auto-plan panel ====================== -->
+        <Border x:Name="AutoPlanPanel" Style="{StaticResource Panel}" IsVisible="False"
+                HorizontalOptions="End" VerticalOptions="Start" Margin="12,60,12,12" WidthRequest="380">
+            <ScrollView MaximumHeightRequest="640">
+                <VerticalStackLayout Spacing="7">
+                    <Label x:Name="AutoPlanTitle" Style="{StaticResource PanelTitle}" />
+
+                    <Label x:Name="PlanTargetsHeader" Style="{StaticResource SectionHeader}" />
+                    <VerticalStackLayout x:Name="PlanTargetsList" Spacing="4" />
+                    <Grid ColumnDefinitions="Auto,*" ColumnSpacing="6">
+                        <Button x:Name="PlanAddTargetButton" Style="{StaticResource IconButton}" Text="&#xE710;" Clicked="OnPlanAddTarget" />
+                        <Picker x:Name="PlanPhasePicker" Grid.Column="1" SelectedIndexChanged="OnPlanPhasePicked" />
+                    </Grid>
+                    <Grid ColumnDefinitions="*,Auto">
+                        <Label x:Name="PlanMaximizeLabel" Style="{StaticResource RowLabel}" FontSize="11.5" />
+                        <Switch x:Name="PlanMaximizeSwitch" Grid.Column="1" />
+                    </Grid>
+
+                    <Label x:Name="PlanProvidedHeader" Style="{StaticResource SectionHeader}" />
+                    <VerticalStackLayout x:Name="PlanProvisionsList" Spacing="4" />
+                    <Button x:Name="PlanAddProvisionButton" Style="{StaticResource IconButton}" Text="&#xE710;" HorizontalOptions="Start" Clicked="OnPlanAddProvision" />
+
+                    <Label x:Name="PlanBannedHeader" Style="{StaticResource SectionHeader}" />
+                    <FlexLayout x:Name="PlanBannedChips" Wrap="Wrap" Direction="Row" JustifyContent="Start" AlignItems="Center" />
+
+                    <Grid ColumnDefinitions="*,Auto" ColumnSpacing="6">
+                        <Label x:Name="PlanBiasLabel" Style="{StaticResource RowLabel}" />
+                        <Picker x:Name="PlanBiasPicker" Grid.Column="1" WidthRequest="150" />
+                    </Grid>
+                    <Grid ColumnDefinitions="*,Auto" ColumnSpacing="6">
+                        <Label x:Name="PlanByproductLabel" Style="{StaticResource RowLabel}" />
+                        <Picker x:Name="PlanByproductPicker" Grid.Column="1" WidthRequest="150" />
+                    </Grid>
+                    <Grid ColumnDefinitions="*,Auto">
+                        <Label x:Name="PlanAlternatesLabel" Style="{StaticResource RowLabel}" />
+                        <Switch x:Name="PlanAlternatesSwitch" Grid.Column="1" IsToggled="True" />
+                    </Grid>
+
+                    <Button x:Name="PlanRunButton" Style="{StaticResource AccentButton}" Clicked="OnPlanRunClicked" />
+                    <Label x:Name="PlanSummaryLabel" Style="{StaticResource MutedLabel}" LineBreakMode="WordWrap" />
+                </VerticalStackLayout>
+            </ScrollView>
+        </Border>
+
+        <!-- part picker for the auto-plan rows -->
+        <Border x:Name="PartPickerPanel" Style="{StaticResource Panel}" IsVisible="False"
+                HorizontalOptions="End" VerticalOptions="Start" Margin="12,60,404,12"
+                WidthRequest="300" HeightRequest="440">
+            <Grid RowDefinitions="Auto,*" RowSpacing="8">
+                <Entry x:Name="PartPickerSearch" Style="{StaticResource FieldEntry}" TextChanged="OnPartPickerSearch" />
+                <CollectionView x:Name="PartPickerList" Grid.Row="1" SelectionMode="None" ItemSizingStrategy="MeasureFirstItem">
+                    <CollectionView.ItemTemplate>
+                        <DataTemplate x:DataType="vm:RecipeListItem">
+                            <Border Style="{StaticResource ListRow}" Margin="0,2">
+                                <Grid ColumnDefinitions="24,*" ColumnSpacing="6">
+                                    <Image Source="{Binding Icon}" WidthRequest="20" HeightRequest="20" VerticalOptions="Center" />
+                                    <Label Grid.Column="1" Text="{Binding DisplayName}" Style="{StaticResource RowLabel}" FontSize="11.5" LineBreakMode="TailTruncation" />
+                                </Grid>
+                                <Border.GestureRecognizers>
+                                    <TapGestureRecognizer Tapped="OnPartPicked" CommandParameter="{Binding Name}" />
+                                </Border.GestureRecognizers>
+                            </Border>
+                        </DataTemplate>
+                    </CollectionView.ItemTemplate>
+                </CollectionView>
+            </Grid>
         </Border>
 
         <!-- inline limit editor, floats over the node's limit box -->

@@ -234,6 +234,7 @@ public partial class MainPage : ContentPage
         ImportSaveButton.Text = "Import resource nodes from game save (.sav)…";
         UpdateMapButton();
         UpdateMapNodesInfo();
+        ApplyAutoPlanStrings();
 
         UpdateScopePill();
     }
@@ -395,6 +396,8 @@ public partial class MainPage : ContentPage
         MachinePopup.IsVisible = false;
         SettingsPanel.IsVisible = false;
         SavesPanel.IsVisible = false;
+        AutoPlanPanel.IsVisible = false;
+        PartPickerPanel.IsVisible = false;
         CommitLimitEditor();
         _popupNode = null;
         _pendingPortConnect = null;
@@ -412,7 +415,8 @@ public partial class MainPage : ContentPage
     private void HandleEscape()
     {
         if (ChooserPanel.IsVisible || MachinePopup.IsVisible
-            || SettingsPanel.IsVisible || SavesPanel.IsVisible || LimitEditor.IsVisible)
+            || SettingsPanel.IsVisible || SavesPanel.IsVisible
+            || AutoPlanPanel.IsVisible || LimitEditor.IsVisible)
         {
             CloseOverlays();
         }
