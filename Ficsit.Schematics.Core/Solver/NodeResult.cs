@@ -13,6 +13,15 @@ public sealed class NodeResult
 
     public bool IsPpmDisplay { get; set; }
 
+    /// <summary>
+    /// Auto-Round: per-machine clock rebalanced so <see cref="Count"/> whole machines
+    /// produce exactly the solved throughput. Null when the node is not rounded.
+    /// </summary>
+    public Rational? EffectiveClock { get; set; }
+
+    /// <summary>True when Auto-Round replaced the fractional count with a whole one.</summary>
+    public bool IsRounded { get; set; }
+
     /// <summary>True when the configuration cannot be satisfied (flagged red).</summary>
     public bool IsInvalid { get; set; }
 

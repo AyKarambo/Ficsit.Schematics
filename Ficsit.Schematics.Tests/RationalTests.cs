@@ -87,4 +87,30 @@ public class RationalTests
         Assert.Equal(-1, (int)new Rational(-8, 9).Floor());
         Assert.Equal(3, (int)new Rational(3, 1).Ceiling());
     }
+
+    [Fact]
+    public void Ceiling_and_floor_are_identity_on_exact_integers()
+    {
+        Assert.Equal(3, (int)new Rational(3, 1).Floor());
+        Assert.Equal(-7, (int)new Rational(-7, 1).Ceiling());
+        Assert.Equal(-7, (int)new Rational(-7, 1).Floor());
+        Assert.Equal(0, (int)Rational.Zero.Ceiling());
+        Assert.Equal(0, (int)Rational.Zero.Floor());
+        Assert.Equal(2, (int)new Rational(14, 7).Ceiling()); // reduces to 2/1
+    }
+
+    [Fact]
+    public void Ceiling_and_floor_handle_negative_fractions_and_big_numerators()
+    {
+        Assert.Equal(-2, (int)new Rational(-25, 9).Ceiling());
+        Assert.Equal(-3, (int)new Rational(-25, 9).Floor());
+
+        // Beyond long: 10^25 + 1/3.
+        var big = System.Numerics.BigInteger.Pow(10, 25);
+        var value = new Rational(big * 3 + 1, 3);
+        Assert.Equal(big + 1, value.Ceiling());
+        Assert.Equal(big, value.Floor());
+        Assert.Equal(-big, (-value).Ceiling());
+        Assert.Equal(-(big + 1), (-value).Floor());
+    }
 }

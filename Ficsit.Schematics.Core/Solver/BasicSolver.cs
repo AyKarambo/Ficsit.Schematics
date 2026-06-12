@@ -361,10 +361,31 @@ public sealed class BasicSolver(GameDatabase data) : ISolver
             }
             else
             {
+                // `count` stays the exact fractional count: port targets and flows
+                // below must be untouched by Auto-Round (hard invariant).
                 nodeResult.Count = count;
                 nodeResult.IsPpmDisplay = profile.IsPpmDisplay;
                 nodeResult.DisplayValue = profile.IsPpmDisplay ? count * profile.PpmUnit : count;
                 nodeResult.Power = count * profile.PowerPerMachine;
+
+                // Auto-Round: present the same throughput as a whole machine count
+                // with the per-machine clock rebalanced down (count was solved at the
+                // entered clock, so N = ceil(count) and effClock = count·clock/N).
+                if (node.AutoRound && node.Kind == NodeKind.Recipe && count.IsPositive)
+                {
+                    var whole = new Rational(count.Ceiling());
+                    var effectiveClock = count * node.ClockSpeed / whole;
+                    if (effectiveClock > FactoryNode.MinClockSpeed
+                        && effectiveClock <= FactoryNode.MaxClockSpeed)
+                    {
+                        nodeResult.Count = whole;
+                        nodeResult.IsRounded = true;
+                        nodeResult.EffectiveClock = effectiveClock;
+                        if (!profile.IsPpmDisplay)
+                            nodeResult.DisplayValue = whole;
+                        nodeResult.Power = whole * profile.PowerPerMachineAt(effectiveClock);
+                    }
+                }
 
                 foreach (var (part, rate) in profile.InRates)
                 {

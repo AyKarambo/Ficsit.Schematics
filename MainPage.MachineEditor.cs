@@ -49,9 +49,12 @@ public partial class MainPage
             }
         }
 
-        PopupClockRow.IsVisible = isRecipe;
-        if (isRecipe)
+        // Auto-Round swaps the free clock entry for the machine-count stepper.
+        PopupClockRow.IsVisible = isRecipe && !node.AutoRound;
+        if (PopupClockRow.IsVisible)
             PopupClockEntry.Text = TrimNumber((node.ClockSpeed * 100).ToDecimalString(4, RoundingMode.Nearest));
+        PopupAutoClockRow.IsVisible = isRecipe && node.AutoRound;
+        RefreshAutoRoundClockRow();
 
         var machine = MachineFor(node);
         PopupSloopRow.IsVisible = machine is { MaxProductionShards: > 0 };
@@ -178,6 +181,58 @@ public partial class MainPage
         PopupClockEntry.Text = TrimNumber((_popupNode.ClockSpeed * 100).ToDecimalString(4, RoundingMode.Nearest));
     }
 
+    // ------------------------------------------- Auto-Round machine stepper
+
+    // "−" rebalances the clock down by adding a machine; "+" up by removing one.
+    private void OnAutoRoundStepDown(object? sender, EventArgs e) => StepMachineCount(+1);
+
+    private void OnAutoRoundStepUp(object? sender, EventArgs e) => StepMachineCount(-1);
+
+    private void StepMachineCount(int delta)
+    {
+        if (_popupNode is null) return;
+        var (workload, count) = AutoRoundState(_popupNode);
+        var target = count + delta;
+        if (!CanStepTo(workload, target)) return;
+        // Stable: re-solving gives ceil(W / (W/N')) == N'. Undoable via SetProperty.
+        _state.Editor.SetClockSpeed(_popupNode, workload / target);
+    }
+
+    /// <summary>
+    /// Exact workload W (machine-equivalents at 100%) and the whole machine count
+    /// from the last solve. When the solver rounded, Count is already whole and
+    /// W = Count × EffectiveClock; otherwise W = Count × ClockSpeed.
+    /// </summary>
+    private (Rational Workload, Rational WholeCount) AutoRoundState(FactoryNode node)
+    {
+        var solved = _state.Editor.Result.For(node);
+        if (solved.EffectiveClock is { } effective)
+            return (solved.Count * effective, solved.Count);
+        return (solved.Count * node.ClockSpeed, new Rational(solved.Count.Ceiling()));
+    }
+
+    /// <summary>W = 0, count &lt; 1, or a rebalanced clock outside (1%, 250%] blocks the step.</summary>
+    private static bool CanStepTo(Rational workload, Rational target)
+    {
+        if (!workload.IsPositive || !target.IsPositive) return false;
+        var clock = workload / target;
+        return clock > FactoryNode.MinClockSpeed && clock <= FactoryNode.MaxClockSpeed;
+    }
+
+    /// <summary>Live "N × clock%" display; called on every solve while the popup shows it.</summary>
+    private void RefreshAutoRoundClockRow()
+    {
+        if (!PopupAutoClockRow.IsVisible || _popupNode is null) return;
+        var (workload, count) = AutoRoundState(_popupNode);
+        PopupAutoClockValue.Text = workload.IsPositive
+            ? $"{count} × {TrimNumber((workload / count * 100).ToDecimalString(4, RoundingMode.Nearest))}%"
+            : "0";
+        // Dim instead of disable (clicks no-op at the bounds): disabled MAUI buttons
+        // have WinUI styling quirks — same pattern as UpdateUndoRedo.
+        PopupAutoClockDownButton.Opacity = CanStepTo(workload, count + 1) ? 1 : 0.35;
+        PopupAutoClockUpButton.Opacity = CanStepTo(workload, count - 1) ? 1 : 0.35;
+    }
+
     private void OnSloopDown(object? sender, EventArgs e) => StepSloop(-1);
 
     private void OnSloopUp(object? sender, EventArgs e) => StepSloop(+1);
@@ -194,6 +249,7 @@ public partial class MainPage
     {
         if (_popupLoading || _popupNode is null) return;
         _state.Editor.SetProperty(_popupNode, "Auto Round", n => n.AutoRound, (n, v) => n.AutoRound = v, e.Value);
+        PopulateMachinePopup(_popupNode); // swap clock entry ↔ machine stepper in place
     }
 
     private void OnPpmToggled(object? sender, ToggledEventArgs e)

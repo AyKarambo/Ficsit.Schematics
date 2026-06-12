@@ -26,6 +26,12 @@ public sealed class FactoryNode
     /// <summary>Limit as entered ("60", "1 1/5"); null/empty = no limit.</summary>
     public string? Max { get; set; }
 
+    /// <summary>Lower clock bound (1%): a valid clock must stay strictly above this.</summary>
+    public static readonly Rational MinClockSpeed = new(1, 100);
+
+    /// <summary>Upper clock bound (250%), inclusive.</summary>
+    public static readonly Rational MaxClockSpeed = new(5, 2);
+
     /// <summary>1 = 100%. Valid range (0, 2.5].</summary>
     public Rational ClockSpeed { get; set; } = Rational.One;
 

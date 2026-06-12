@@ -39,6 +39,11 @@ internal sealed class NodeProfile
     /// <summary>Average MW per machine (signed; negative consumes).</summary>
     public Rational PowerPerMachine { get; set; } = Rational.Zero;
 
+    // Inputs for re-evaluating power at a different clock (Auto-Round).
+    private MachineDefinition? _machine;
+    private Rational _powerRatio = Rational.One;
+    private Rational _powerMultiplier = Rational.Zero; // zero = unset
+
     /// <summary>Sink points per minute per ppm-unit (AWESOME Sink).</summary>
     public bool IsAwesomeSink { get; set; }
 
@@ -166,22 +171,34 @@ internal sealed class NodeProfile
 
         if (machine is not null)
         {
-            var power = machine.AveragePowerValue;
-            if (!power.IsZero)
-            {
-                var clockFactor = clock == Rational.One
-                    ? 1.0
-                    : clock.Pow(machine.OverclockPowerExponentValue);
-                var sloopPowerFactor = node.Somersloops > 0 && machine.MaxProductionShards > 0
-                    ? new Rational(machine.MaxProductionShards + node.Somersloops, machine.MaxProductionShards)
-                        .Pow(machine.ProductionShardPowerExponentValue)
-                    : 1.0;
-                var approx = power.ToDouble() * clockFactor * (power.IsNegative ? sloopPowerFactor : 1.0);
-                var powerMultiplier = GameDatabase.ParseOrZero(document.PowerMultiplier);
-                if (!powerMultiplier.IsZero && power.IsNegative) approx *= powerMultiplier.ToDouble();
-                profile.PowerPerMachine = FromDouble(approx) * powerRatio;
-            }
+            profile._machine = machine;
+            profile._powerRatio = powerRatio;
+            profile._powerMultiplier = GameDatabase.ParseOrZero(document.PowerMultiplier);
+            profile.PowerPerMachine = profile.PowerPerMachineAt(clock);
         }
+    }
+
+    /// <summary>
+    /// Average MW per machine at the given clock — same formula that produced
+    /// <see cref="PowerPerMachine"/> (which was evaluated at the entered clock).
+    /// Auto-Round re-evaluates it at the rebalanced effective clock.
+    /// </summary>
+    public Rational PowerPerMachineAt(Rational clock)
+    {
+        if (_machine is null) return Rational.Zero;
+        var power = _machine.AveragePowerValue;
+        if (power.IsZero) return Rational.Zero;
+
+        var clockFactor = clock == Rational.One
+            ? 1.0
+            : clock.Pow(_machine.OverclockPowerExponentValue);
+        var sloopPowerFactor = Node.Somersloops > 0 && _machine.MaxProductionShards > 0
+            ? new Rational(_machine.MaxProductionShards + Node.Somersloops, _machine.MaxProductionShards)
+                .Pow(_machine.ProductionShardPowerExponentValue)
+            : 1.0;
+        var approx = power.ToDouble() * clockFactor * (power.IsNegative ? sloopPowerFactor : 1.0);
+        if (!_powerMultiplier.IsZero && power.IsNegative) approx *= _powerMultiplier.ToDouble();
+        return FromDouble(approx) * _powerRatio;
     }
 
     private static Rational CapacityRatio(FactoryNode node, GameDatabase data, string familyName)

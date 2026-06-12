@@ -365,6 +365,16 @@
                     <Button Grid.Column="3" Style="{StaticResource IconButton}" Text="&#xE710;" FontSize="11" WidthRequest="30" Clicked="OnClockStepUp" />
                 </Grid>
 
+                <!-- Auto-Round replaces the free clock entry: read-only "N × clock%"
+                     with a machine-count stepper (− = more machines, + = fewer). -->
+                <Grid x:Name="PopupAutoClockRow" IsVisible="False" ColumnDefinitions="Auto,*,Auto,Auto" ColumnSpacing="4">
+                    <Label x:Name="PopupAutoClockLabel" Style="{StaticResource RowLabel}" />
+                    <Label x:Name="PopupAutoClockValue" Grid.Column="1" Style="{StaticResource RowLabel}"
+                           FontFamily="OpenSansSemibold" HorizontalTextAlignment="End" Margin="0,0,8,0" />
+                    <Button x:Name="PopupAutoClockDownButton" Grid.Column="2" Style="{StaticResource IconButton}" Text="&#xE738;" FontSize="11" WidthRequest="30" Clicked="OnAutoRoundStepDown" />
+                    <Button x:Name="PopupAutoClockUpButton" Grid.Column="3" Style="{StaticResource IconButton}" Text="&#xE710;" FontSize="11" WidthRequest="30" Clicked="OnAutoRoundStepUp" />
+                </Grid>
+
                 <Grid x:Name="PopupSloopRow" ColumnDefinitions="Auto,*,Auto,Auto" ColumnSpacing="4">
                     <Label x:Name="PopupSloopLabel" Style="{StaticResource RowLabel}" />
                     <Label x:Name="PopupSloopValue" Grid.Column="1" Style="{StaticResource RowLabel}"

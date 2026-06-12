@@ -187,6 +187,109 @@ public class SolverTests
         Assert.Equal(new Rational(-8), result.For(smelter).Power);
     }
 
+    // ------------------------------------------------------------ Auto-Round
+
+    /// <summary>165 ore/min into 30/min-per-machine smelters → exactly 5.5 machines.</summary>
+    private static (FactoryDocument Doc, FactoryNode Miner, FactoryNode Smelter) HalfMachineFixture(bool autoRound)
+    {
+        var doc = new FactoryDocument();
+        var miner = Node(doc, "Iron Ore", "165");
+        var smelter = Node(doc, "Iron Ingot");
+        smelter.AutoRound = autoRound;
+        Connect(doc, miner, "Iron Ore", smelter);
+        return (doc, miner, smelter);
+    }
+
+    [Fact]
+    public void Auto_round_rounds_count_up_and_rebalances_clock()
+    {
+        var (doc, _, smelter) = HalfMachineFixture(autoRound: true);
+        var result = Solve(doc);
+
+        var node = result.For(smelter);
+        Assert.Equal(new Rational(6), node.Count);
+        Assert.Equal(new Rational(6), node.DisplayValue);
+        Assert.Equal(new Rational(11, 12), node.EffectiveClock); // 5.5/6, exactly
+        Assert.True(node.IsRounded);
+    }
+
+    [Fact]
+    public void Auto_round_off_keeps_fractional_count()
+    {
+        var (doc, _, smelter) = HalfMachineFixture(autoRound: false);
+        var result = Solve(doc);
+
+        var node = result.For(smelter);
+        Assert.Equal(new Rational(11, 2), node.Count);
+        Assert.Equal(new Rational(11, 2), node.DisplayValue);
+        Assert.Null(node.EffectiveClock);
+        Assert.False(node.IsRounded);
+    }
+
+    [Fact]
+    public void Auto_round_never_changes_port_flows()
+    {
+        var (docOff, minerOff, smelterOff) = HalfMachineFixture(autoRound: false);
+        var (docOn, minerOn, smelterOn) = HalfMachineFixture(autoRound: true);
+        var off = Solve(docOff);
+        var on = Solve(docOn);
+
+        Assert.Equal(off.For(smelterOff).Inputs["Iron Ore"].Target, on.For(smelterOn).Inputs["Iron Ore"].Target);
+        Assert.Equal(off.For(smelterOff).Inputs["Iron Ore"].Connected, on.For(smelterOn).Inputs["Iron Ore"].Connected);
+        Assert.Equal(off.For(smelterOff).Outputs["Iron Ingot"].Target, on.For(smelterOn).Outputs["Iron Ingot"].Target);
+        Assert.Equal(new Rational(165), on.For(smelterOn).Inputs["Iron Ore"].Target); // 5.5 machines' worth
+        Assert.Equal(off.For(minerOff).DisplayValue, on.For(minerOn).DisplayValue);
+        Assert.Equal(
+            off.Flows[docOff.Root.Connections.Single()],
+            on.Flows[docOn.Root.Connections.Single()]);
+    }
+
+    [Fact]
+    public void Auto_round_power_uses_the_effective_clock()
+    {
+        var (doc, _, smelter) = HalfMachineFixture(autoRound: true);
+        var result = Solve(doc);
+
+        // Smelter: −4 MW at 100%, exponent 1.321929; rounded to micro-MW like the
+        // solver's power path, then × 6 machines at the rebalanced 11/12 clock.
+        var clockFactor = new Rational(11, 12).Pow(new Rational(1321929, 1000000));
+        var perMachine = new Rational((long)Math.Round(-4.0 * clockFactor * 1_000_000.0), 1_000_000);
+        Assert.Equal(new Rational(6) * perMachine, result.For(smelter).Power);
+    }
+
+    [Fact]
+    public void Auto_round_keeps_ppm_display_throughput_based()
+    {
+        var (doc, _, smelter) = HalfMachineFixture(autoRound: true);
+        smelter.ShowPpm = true;
+        var result = Solve(doc);
+
+        var node = result.For(smelter);
+        Assert.True(node.IsPpmDisplay);
+        Assert.Equal(new Rational(165), node.DisplayValue); // 5.5 machines × 30/min, unrounded
+        Assert.Equal(new Rational(6), node.Count);          // popup still gets the whole count
+        Assert.Equal(new Rational(11, 12), node.EffectiveClock);
+    }
+
+    [Fact]
+    public void Auto_round_stepped_clock_round_trips_through_serializer()
+    {
+        // Stepping 5.5 machine-equivalents to 5 machines stores clock W/N' = 11/10.
+        var (doc, _, smelter) = HalfMachineFixture(autoRound: true);
+        smelter.ClockSpeed = new Rational(11, 10);
+
+        var restored = SfmdSerializer.Deserialize(SfmdSerializer.Serialize(doc));
+        var restoredSmelter = restored.Root.Nodes.Single(n => n.Name == "Iron Ingot");
+        Assert.True(restoredSmelter.AutoRound);
+        Assert.Equal(new Rational(11, 10), restoredSmelter.ClockSpeed);
+
+        var result = Solve(restored);
+        var node = result.For(restoredSmelter);
+        Assert.Equal(new Rational(5), node.Count);              // ceil(W / (W/5)) == 5: stable
+        Assert.Equal(new Rational(11, 10), node.EffectiveClock); // exactly the stored clock
+        Assert.Equal(new Rational(165), node.Inputs["Iron Ore"].Target);
+    }
+
     [Fact]
     public void Manual_solver_pins_entered_counts()
     {

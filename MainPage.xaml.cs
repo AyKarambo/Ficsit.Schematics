@@ -195,6 +195,7 @@ public partial class MainPage : ContentPage
         PopupTitleEntry.Placeholder = _loc.L("TITLE");
         PopupRecipeLabel.Text = _loc.L("RECIPE_NAME");
         PopupClockLabel.Text = _loc.L("CLOCKSPEED");
+        PopupAutoClockLabel.Text = _loc.L("CLOCKSPEED");
         PopupSloopLabel.Text = _loc.L("Somersloop");
         PopupAutoRoundLabel.Text = _loc.L("AUTO_ROUND");
         PopupPpmLabel.Text = _loc.L("PPM");
@@ -247,6 +248,7 @@ public partial class MainPage : ContentPage
         Canvas.Invalidate();
         UpdateUndoRedo();
         UpdateStatus();
+        RefreshAutoRoundClockRow(); // keep the popup's "N × clock%" row live
         if (SummaryPanel.IsVisible) Summary.Refresh();
         QueueSave();
     }

@@ -224,7 +224,7 @@ public sealed class FactoryEditor
     public void SetClockSpeed(FactoryNode node, Rational clock)
     {
         if (!clock.IsPositive) return;
-        if (clock > new Rational(5, 2)) clock = new Rational(5, 2);
+        if (clock > FactoryNode.MaxClockSpeed) clock = FactoryNode.MaxClockSpeed;
         SetProperty(node, "Clock Speed", n => n.ClockSpeed, (n, v) => n.ClockSpeed = v, clock);
     }
 
@@ -241,7 +241,7 @@ public sealed class FactoryEditor
         var target = roundCountUp ? count.Ceiling() : count.Floor();
         if (target.IsZero) target = 1;
         var newClock = node.ClockSpeed * count / new Rational(target);
-        if (newClock > new Rational(5, 2)) return;
+        if (newClock > FactoryNode.MaxClockSpeed) return;
         SetClockSpeed(node, newClock);
     }
 
