@@ -1,0 +1,234 @@
+using Ficsit.Schematics.Canvas;
+using Ficsit.Schematics.Core.GameData;
+using Ficsit.Schematics.Core.Planning;
+
+namespace Ficsit.Schematics;
+
+/// <summary>
+/// The per-recipe enable/disable list (#5). One shared, persisted state
+/// (<see cref="Core.Model.AppSettings.PlannerDisabledRecipes"/>, the *disabled*
+/// set so new data-update recipes default on) with two entry points: the
+/// Auto-Plan panel and Settings. Rows are grouped by primary output part and
+/// reuse the chooser row's visual style; a checkbox toggles each recipe.
+/// </summary>
+public partial class MainPage
+{
+    private readonly List<(RecipeDefinition Recipe, CheckBox Check, Grid Row, string Group)> _recipeListRows = [];
+    private Border? _recipeListReturnPanel;
+    private bool _recipeListBuilt;
+
+    private HashSet<string> DisabledRecipes => _disabledRecipesCache ??=
+        new HashSet<string>(_state.Settings.PlannerDisabledRecipes);
+    private HashSet<string>? _disabledRecipesCache;
+
+    private void ApplyRecipeListStrings()
+    {
+        RecipeListTitle.Text = "Recipes";
+        RecipeListSearch.Placeholder = _loc.L("RECIPE_NAME") + "…";
+        RecipeListAllOnButton.Text = "All on";
+        RecipeListAlternatesOffButton.Text = "Alternates off";
+        RecipeListFromSaveButton.Text = "From save";
+        ToolTipProperties.SetText(RecipeListBackButton, "Back");
+
+        PlanExcludeManualLabel.Text = "Exclude hand-gathered parts";
+        PlanOreConversionLabel.Text = "Allow ore conversion";
+        PlanRecipesButton.Text = "Recipes…";
+
+        SettingsPlannerHeader.Text = "AUTO-PLANNER";
+        SettingsExcludeManualLabel.Text = "Exclude hand-gathered parts";
+        SettingsOreConversionLabel.Text = "Allow ore conversion";
+        SettingsRecipesButton.Text = "Recipes…";
+    }
+
+    /// <summary>Pushes the two toggles into the planner switches (both entry points).</summary>
+    private void ApplyPlannerToggleControls()
+    {
+        var wasInitializing = _initializing;
+        _initializing = true;
+        PlanExcludeManualSwitch.IsToggled = _state.Settings.PlannerExcludeManualParts;
+        PlanOreConversionSwitch.IsToggled = _state.Settings.PlannerAllowOreConversion;
+        SettingsExcludeManualSwitch.IsToggled = _state.Settings.PlannerExcludeManualParts;
+        SettingsOreConversionSwitch.IsToggled = _state.Settings.PlannerAllowOreConversion;
+        _initializing = wasInitializing;
+    }
+
+    private void OnPlanExcludeManualToggled(object? sender, ToggledEventArgs e)
+    {
+        if (_initializing) return;
+        _state.Settings.PlannerExcludeManualParts = e.Value;
+        _state.SaveSettings();
+        ApplyPlannerToggleControls();
+    }
+
+    private void OnPlanOreConversionToggled(object? sender, ToggledEventArgs e)
+    {
+        if (_initializing) return;
+        _state.Settings.PlannerAllowOreConversion = e.Value;
+        _state.SaveSettings();
+        ApplyPlannerToggleControls();
+    }
+
+    // ------------------------------------------------------------ list view
+
+    private void OnPlanRecipesClicked(object? sender, EventArgs e)
+    {
+        // Remember which panel to restore (Auto-Plan vs Settings) on Back.
+        _recipeListReturnPanel = AutoPlanPanel.IsVisible ? AutoPlanPanel
+            : SettingsPanel.IsVisible ? SettingsPanel
+            : null;
+        CloseOverlays();
+        EnsureRecipeListBuilt();
+        SyncRecipeListChecks();
+        RecipeListSearch.Text = string.Empty;
+        RecipeListPanel.IsVisible = true;
+    }
+
+    private void OnRecipeListBack(object? sender, EventArgs e)
+    {
+        RecipeListPanel.IsVisible = false;
+        if (_recipeListReturnPanel is { } panel) panel.IsVisible = true;
+        _recipeListReturnPanel = null;
+    }
+
+    private void EnsureRecipeListBuilt()
+    {
+        if (_recipeListBuilt) return;
+        _recipeListBuilt = true;
+
+        // Group by primary output part, in canonical game-data order.
+        foreach (var recipe in Data.Document.Recipes)
+        {
+            if (!recipe.Inputs.Any() || !recipe.Outputs.Any()) continue;
+            if (recipe.Machine == "Space Elevator" || recipe.Ficsmas) continue;
+            var group = recipe.Outputs.First().Part;
+            var (check, row) = BuildRecipeRow(recipe, group);
+            _recipeListRows.Add((recipe, check, row, group));
+        }
+        RenderRecipeList(string.Empty);
+    }
+
+    private (CheckBox Check, Grid Row) BuildRecipeRow(RecipeDefinition recipe, string group)
+    {
+        var check = new CheckBox { VerticalOptions = LayoutOptions.Center };
+        check.CheckedChanged += (_, _) => OnRecipeChecked(recipe.Name, check.IsChecked);
+
+        var icon = new Image
+        {
+            Source = _icons.GetSource(group),
+            WidthRequest = 20,
+            HeightRequest = 20,
+            VerticalOptions = LayoutOptions.Center,
+        };
+        var label = new Label
+        {
+            Text = _loc.L(recipe.Name) + (recipe.Alternate ? "  (alt)" : ""),
+            FontSize = 11.5,
+            LineBreakMode = LineBreakMode.TailTruncation,
+            VerticalOptions = LayoutOptions.Center,
+            TextColor = recipe.Alternate ? CanvasTheme.Accent : RowTextColor(),
+        };
+
+        var grid = new Grid { ColumnSpacing = 6, Padding = new Thickness(2, 1) };
+        grid.ColumnDefinitions.Add(new ColumnDefinition(GridLength.Auto));
+        grid.ColumnDefinitions.Add(new ColumnDefinition(24));
+        grid.ColumnDefinitions.Add(new ColumnDefinition(GridLength.Star));
+        grid.Children.Add(check);
+        Grid.SetColumn(icon, 1);
+        grid.Children.Add(icon);
+        Grid.SetColumn(label, 2);
+        grid.Children.Add(label);
+        return (check, grid);
+    }
+
+    private void OnRecipeChecked(string recipeName, bool isChecked)
+    {
+        if (_syncingRecipeChecks) return;
+        if (isChecked) DisabledRecipes.Remove(recipeName);
+        else DisabledRecipes.Add(recipeName);
+        PersistDisabledRecipes();
+    }
+
+    private void PersistDisabledRecipes()
+    {
+        _state.Settings.PlannerDisabledRecipes = DisabledRecipes.OrderBy(n => n).ToList();
+        _state.SaveSettings();
+    }
+
+    /// <summary>Reflects the persisted disabled set onto every checkbox without
+    /// firing the CheckedChanged write-back.</summary>
+    private void SyncRecipeListChecks()
+    {
+        _syncingRecipeChecks = true;
+        foreach (var (recipe, check, _, _) in _recipeListRows)
+            check.IsChecked = !DisabledRecipes.Contains(recipe.Name);
+        _syncingRecipeChecks = false;
+    }
+
+    private bool _syncingRecipeChecks;
+
+    private void OnRecipeListSearch(object? sender, TextChangedEventArgs e)
+        => RenderRecipeList(e.NewTextValue?.Trim() ?? string.Empty);
+
+    private void RenderRecipeList(string query)
+    {
+        RecipeListItems.Children.Clear();
+        string? lastGroup = null;
+        foreach (var (recipe, _, row, group) in _recipeListRows)
+        {
+            if (query.Length > 0 && !RecipeMatches(recipe, group, query)) continue;
+            if (group != lastGroup)
+            {
+                RecipeListItems.Children.Add(new Label
+                {
+                    Text = _loc.L(group),
+                    Style = (Style)Resources["SectionHeader"],
+                    Margin = new Thickness(0, 6, 0, 0),
+                });
+                lastGroup = group;
+            }
+            RecipeListItems.Children.Add(row);
+        }
+    }
+
+    private bool RecipeMatches(RecipeDefinition recipe, string group, string query)
+    {
+        bool Contains(string text)
+            => text.Contains(query, StringComparison.OrdinalIgnoreCase)
+               || _loc.L(text).Contains(query, StringComparison.OrdinalIgnoreCase);
+        return Contains(recipe.Name) || Contains(group);
+    }
+
+    // --------------------------------------------------------- bulk actions
+
+    private void OnRecipeListAllOn(object? sender, EventArgs e)
+    {
+        DisabledRecipes.Clear();
+        PersistDisabledRecipes();
+        SyncRecipeListChecks();
+    }
+
+    private void OnRecipeListAlternatesOff(object? sender, EventArgs e)
+    {
+        foreach (var (recipe, _, _, _) in _recipeListRows)
+            if (recipe.Alternate)
+                DisabledRecipes.Add(recipe.Name);
+        PersistDisabledRecipes();
+        SyncRecipeListChecks();
+    }
+
+    /// <summary>
+    /// STUB — Phase 5 ("From save") is a separate spike. This wires the button
+    /// but the handler is a deliberate no-op. See docs/specs/from-save-spike.md:
+    /// it must read the selected save's purchased-schematics list and enable
+    /// exactly the unlocked alternates (standard recipes stay on).
+    /// </summary>
+    private async void OnRecipeListFromSave(object? sender, EventArgs e)
+    {
+        // TODO(from-save-spike): docs/specs/from-save-spike.md — read the
+        // schematic manager's mPurchasedSchematics out of the selected save,
+        // map schematic asset names to recipe names, and enable exactly those
+        // alternates. No-op until the spike lands.
+        await DisplayAlertAsync("Auto-Planner",
+            "“From save” is not available yet — coming with the save-import spike.", "OK");
+    }
+}

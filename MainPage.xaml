@@ -450,6 +450,18 @@
                         <Picker x:Name="PathStylePicker" Grid.Column="1" WidthRequest="130" SelectedIndexChanged="OnPathStyleChanged" />
                     </Grid>
 
+                    <Label x:Name="SettingsPlannerHeader" Style="{StaticResource SectionHeader}" />
+                    <Grid ColumnDefinitions="*,Auto">
+                        <Label x:Name="SettingsExcludeManualLabel" Style="{StaticResource RowLabel}" FontSize="11.5" />
+                        <Switch x:Name="SettingsExcludeManualSwitch" Grid.Column="1" Toggled="OnPlanExcludeManualToggled" />
+                    </Grid>
+                    <Grid ColumnDefinitions="*,Auto">
+                        <Label x:Name="SettingsOreConversionLabel" Style="{StaticResource RowLabel}" FontSize="11.5" />
+                        <Switch x:Name="SettingsOreConversionSwitch" Grid.Column="1" Toggled="OnPlanOreConversionToggled" />
+                    </Grid>
+                    <Button x:Name="SettingsRecipesButton" Style="{StaticResource TextButton}" FontSize="12"
+                            HorizontalOptions="Start" Clicked="OnPlanRecipesClicked" />
+
                     <Label x:Name="SettingsMapHeader" Style="{StaticResource SectionHeader}" />
                     <Button x:Name="ImportSaveButton" Style="{StaticResource TextButton}" FontSize="12"
                             HorizontalOptions="Start" Clicked="OnImportSaveClicked" />
@@ -545,9 +557,15 @@
                         <Picker x:Name="PlanByproductPicker" Grid.Column="1" WidthRequest="150" />
                     </Grid>
                     <Grid ColumnDefinitions="*,Auto">
-                        <Label x:Name="PlanAlternatesLabel" Style="{StaticResource RowLabel}" />
-                        <Switch x:Name="PlanAlternatesSwitch" Grid.Column="1" IsToggled="True" />
+                        <Label x:Name="PlanExcludeManualLabel" Style="{StaticResource RowLabel}" FontSize="11.5" />
+                        <Switch x:Name="PlanExcludeManualSwitch" Grid.Column="1" Toggled="OnPlanExcludeManualToggled" />
                     </Grid>
+                    <Grid ColumnDefinitions="*,Auto">
+                        <Label x:Name="PlanOreConversionLabel" Style="{StaticResource RowLabel}" FontSize="11.5" />
+                        <Switch x:Name="PlanOreConversionSwitch" Grid.Column="1" Toggled="OnPlanOreConversionToggled" />
+                    </Grid>
+                    <Button x:Name="PlanRecipesButton" Style="{StaticResource TextButton}" FontSize="12"
+                            HorizontalOptions="Start" Clicked="OnPlanRecipesClicked" />
 
                     <Button x:Name="PlanRunButton" Style="{StaticResource AccentButton}" Clicked="OnPlanRunClicked" />
                     <Label x:Name="PlanSummaryLabel" Style="{StaticResource MutedLabel}" LineBreakMode="WordWrap" />
@@ -576,6 +594,31 @@
                         </DataTemplate>
                     </CollectionView.ItemTemplate>
                 </CollectionView>
+            </Grid>
+        </Border>
+
+        <!-- ============ recipe enable/disable list (shared by Auto-Plan & Settings) ============ -->
+        <Border x:Name="RecipeListPanel" Style="{StaticResource Panel}" IsVisible="False"
+                HorizontalOptions="End" VerticalOptions="Start" Margin="12,60,12,12"
+                WidthRequest="380" HeightRequest="640">
+            <Grid RowDefinitions="Auto,Auto,Auto,*" RowSpacing="8">
+                <Grid ColumnDefinitions="Auto,*" ColumnSpacing="6">
+                    <Button x:Name="RecipeListBackButton" Style="{StaticResource IconButton}" Text="&#xE72B;"
+                            WidthRequest="30" HeightRequest="28" Clicked="OnRecipeListBack" />
+                    <Label x:Name="RecipeListTitle" Grid.Column="1" Style="{StaticResource PanelTitle}" VerticalOptions="Center" />
+                </Grid>
+                <Entry x:Name="RecipeListSearch" Grid.Row="1" Style="{StaticResource FieldEntry}" TextChanged="OnRecipeListSearch" />
+                <FlexLayout Grid.Row="2" Wrap="Wrap" Direction="Row" JustifyContent="Start" AlignItems="Center">
+                    <Button x:Name="RecipeListAllOnButton" Style="{StaticResource TextButton}" FontSize="11"
+                            Margin="0,0,6,0" Clicked="OnRecipeListAllOn" />
+                    <Button x:Name="RecipeListAlternatesOffButton" Style="{StaticResource TextButton}" FontSize="11"
+                            Margin="0,0,6,0" Clicked="OnRecipeListAlternatesOff" />
+                    <Button x:Name="RecipeListFromSaveButton" Style="{StaticResource TextButton}" FontSize="11"
+                            Clicked="OnRecipeListFromSave" />
+                </FlexLayout>
+                <ScrollView Grid.Row="3">
+                    <VerticalStackLayout x:Name="RecipeListItems" Spacing="2" />
+                </ScrollView>
             </Grid>
         </Border>
 

@@ -78,8 +78,8 @@ public partial class MainPage
         PlanBannedHeader.Text = "EXCLUDED RESOURCES (CLICK TO BAN)";
         PlanBiasLabel.Text = "Optimize for";
         PlanByproductLabel.Text = "Byproducts";
-        PlanAlternatesLabel.Text = "Use alternate recipes";
         PlanRunButton.Text = "Plan factory";
+        ApplyRecipeListStrings();
         PartPickerSearch.Placeholder = _loc.L("RECIPE_NAME") + "…";
         ToolTipProperties.SetText(PlanAddTargetButton, "Add target");
         ToolTipProperties.SetText(PlanAddProvisionButton, "Add provided input");
@@ -252,9 +252,19 @@ public partial class MainPage
             MaximizeFromProvisions = PlanMaximizeSwitch.IsToggled,
             Bias = (PlanBias)Math.Max(0, PlanBiasPicker.SelectedIndex),
             Byproducts = PlanByproductPicker.SelectedIndex == 1 ? ByproductMode.AllowSink : ByproductMode.Eliminate,
-            UseAlternateRecipes = PlanAlternatesSwitch.IsToggled,
         };
         foreach (var banned in _planBanned) request.BannedResources.Add(banned);
+
+        // Map the persisted recipe controls onto the primitive request.
+        foreach (var disabled in _state.Settings.PlannerDisabledRecipes)
+            request.DisabledRecipes.Add(disabled);
+        if (_state.Settings.PlannerExcludeManualParts)
+            foreach (var part in Data.Document.Parts)
+                if (part.IsManuallyGathered)
+                    request.BannedResources.Add(part.Name);
+        if (!_state.Settings.PlannerAllowOreConversion)
+            foreach (var recipe in FactoryPlanner.OreConversionRecipes(Data))
+                request.DisabledRecipes.Add(recipe);
 
         foreach (var row in _planTargetRows)
         {

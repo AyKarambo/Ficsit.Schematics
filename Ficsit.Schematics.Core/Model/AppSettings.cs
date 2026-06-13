@@ -45,6 +45,25 @@ public sealed class AppSettings
 
     public List<MachineDefaultSetting> MachineDefaults { get; set; } = [];
 
+    /// <summary>
+    /// Auto-planner: exclude manually gathered parts (Leaves, Wood, alien
+    /// remains, …) as raw inputs. Default on — plans should not invent free
+    /// hand-collected resources.
+    /// </summary>
+    public bool PlannerExcludeManualParts { get; set; } = true;
+
+    /// <summary>
+    /// Auto-planner: allow Converter ore-from-SAM conversion recipes. Default off
+    /// — they otherwise dominate "efficient" plans.
+    /// </summary>
+    public bool PlannerAllowOreConversion { get; set; }
+
+    /// <summary>
+    /// Auto-planner: recipes (by name) the user has disabled. The *disabled* set
+    /// is stored so recipes added by future data updates default to enabled.
+    /// </summary>
+    public List<string> PlannerDisabledRecipes { get; set; } = [];
+
     public static Dictionary<string, NumberFormatSetting> DefaultNumbers() => new()
     {
         ["value"] = new() { DisplayType = "Decimal", DecimalPlaces = 2 },

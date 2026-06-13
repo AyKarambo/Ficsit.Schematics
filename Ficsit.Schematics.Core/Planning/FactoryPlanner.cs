@@ -111,7 +111,9 @@ public static class FactoryPlanner
         {
             var provided = provisionByPart.TryGetValue(part, out var provision);
             var isExternal = weights.ContainsKey(part) || !producible.Contains(part);
-            if (request.BannedResources.Contains(part)) continue;
+            // A provision is a deliberate user supply: it overrides the ban so a
+            // banned-but-provisioned part still gets its capped supply column.
+            if (request.BannedResources.Contains(part) && !provided) continue;
             if (!provided && (!isExternal || request.MaximizeFromProvisions)) continue;
 
             // Capped supplies carry their cap-row entry inline so the column
@@ -276,6 +278,49 @@ public static class FactoryPlanner
                 .ToList()))
             .ToList();
 
+    /// <summary>Machines that pull a part straight out of the ground/water.</summary>
+    private static readonly HashSet<string> ExtractorMachines =
+        ["Miner", "Oil Extractor", "Water Extractor", "Resource Well Extractor", "Resource Well Pressurizer"];
+
+    /// <summary>
+    /// Parts that some extraction recipe outputs (ores, Crude Oil, Water,
+    /// Nitrogen Gas, SAM, …), plus anything the scarcity model already prices as
+    /// a raw. This is the "extractable raw" notion the ore-conversion filter and
+    /// the supply loop share.
+    /// </summary>
+    public static HashSet<string> ExtractableRaws(GameDatabase data)
+    {
+        var raws = new HashSet<string>(ScarcityWeights.Build(null).Keys);
+        foreach (var recipe in data.Document.Recipes)
+        {
+            if (!ExtractorMachines.Contains(recipe.Machine)) continue;
+            foreach (var output in recipe.Outputs)
+                raws.Add(output.Part);
+        }
+        return raws;
+    }
+
+    /// <summary>
+    /// Converter recipes that synthesize an extractable raw from SAM ("ore
+    /// conversion"). Off by default — they otherwise dominate efficient plans.
+    /// </summary>
+    public static IEnumerable<string> OreConversionRecipes(GameDatabase data)
+    {
+        var raws = ExtractableRaws(data);
+        foreach (var recipe in data.Document.Recipes)
+        {
+            if (recipe.Machine != "Converter") continue;
+            foreach (var output in recipe.Outputs)
+            {
+                if (raws.Contains(output.Part))
+                {
+                    yield return recipe.Name;
+                    break;
+                }
+            }
+        }
+    }
+
     // ------------------------------------------------------------- internals
 
     /// <summary>Backward closure from the targets over eligible recipes,
@@ -291,7 +336,7 @@ public static class FactoryPlanner
             if (!recipe.Inputs.Any() || !recipe.Outputs.Any()) continue;
             if (recipe.Machine == "Space Elevator") continue;
             if (recipe.Ficsmas) continue;
-            if (!request.UseAlternateRecipes && recipe.Alternate) continue;
+            if (request.DisabledRecipes.Contains(recipe.Name)) continue;
 
             var hasExclusiveOutput = false;
             foreach (var output in recipe.Outputs)

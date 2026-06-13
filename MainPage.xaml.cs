@@ -163,6 +163,7 @@ public partial class MainPage : ContentPage
         AutosaveIntervalEntry.Text = _state.Settings.AutosaveIntervalMinutes.ToString();
 
         _initializing = wasInitializing;
+        ApplyPlannerToggleControls();
     }
 
     private void ApplyStrings()
@@ -400,6 +401,7 @@ public partial class MainPage : ContentPage
         SavesPanel.IsVisible = false;
         AutoPlanPanel.IsVisible = false;
         PartPickerPanel.IsVisible = false;
+        RecipeListPanel.IsVisible = false;
         CommitLimitEditor();
         _popupNode = null;
         _pendingPortConnect = null;
@@ -418,7 +420,7 @@ public partial class MainPage : ContentPage
     {
         if (ChooserPanel.IsVisible || MachinePopup.IsVisible
             || SettingsPanel.IsVisible || SavesPanel.IsVisible
-            || AutoPlanPanel.IsVisible || LimitEditor.IsVisible)
+            || AutoPlanPanel.IsVisible || RecipeListPanel.IsVisible || LimitEditor.IsVisible)
         {
             CloseOverlays();
         }

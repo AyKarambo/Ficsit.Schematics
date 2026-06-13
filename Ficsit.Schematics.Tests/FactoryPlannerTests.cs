@@ -90,6 +90,15 @@ public class FactoryPlannerTests
             $"Expected ≥40 plates/min from 60 ore, got {plan.Outputs["Iron Plate"]}");
     }
 
+    /// <summary>Disables every alternate recipe — the "Alternates off" bulk
+    /// action's effect, replacing the retired <c>UseAlternateRecipes = false</c>.</summary>
+    private static void DisableAlternates(PlanRequest request)
+    {
+        foreach (var recipe in TestData.Database.Document.Recipes)
+            if (recipe.Alternate)
+                request.DisabledRecipes.Add(recipe.Name);
+    }
+
     /// <summary>
     /// "I already make 45 iron ingots/min elsewhere and that is all there is":
     /// 60 plates need 90 ingots, so the whole output scales to half.
@@ -100,8 +109,8 @@ public class FactoryPlannerTests
         var request = new PlanRequest
         {
             Byproducts = ByproductMode.AllowSink,
-            UseAlternateRecipes = false,
         };
+        DisableAlternates(request);
         request.Targets.Add(new PlanTarget("Iron Plate", new Rational(60)));
         request.Provisions.Add(new PlanProvision("Iron Ingot", new Rational(45), Exclusive: true));
 
@@ -123,8 +132,8 @@ public class FactoryPlannerTests
         var request = new PlanRequest
         {
             Byproducts = ByproductMode.AllowSink,
-            UseAlternateRecipes = false,
         };
+        DisableAlternates(request);
         request.Targets.Add(new PlanTarget("Iron Plate", new Rational(60)));
         request.Provisions.Add(new PlanProvision("Iron Ingot", new Rational(45), Exclusive: false));
 
@@ -134,6 +143,124 @@ public class FactoryPlannerTests
         Assert.Equal(Rational.One, plan.AchievedFraction);
         Assert.Equal(new Rational(60), plan.Outputs["Iron Plate"]);
         Assert.Contains(plan.Recipes, r => r.Recipe == "Iron Ingot");
+    }
+
+    /// <summary>
+    /// Adds every manually gathered part to the ban set — mirrors what the
+    /// Auto-Plan panel does when "Exclude manually gathered parts" is on (default).
+    /// </summary>
+    private static void ExcludeManualParts(PlanRequest request)
+    {
+        foreach (var part in TestData.Database.Document.Parts)
+            if (part.IsManuallyGathered)
+                request.BannedResources.Add(part.Name);
+    }
+
+    /// <summary>
+    /// Default planning (manual parts excluded) sources Coal by mining it, never
+    /// through the Biomass→Coal / Wood→Coal hand-gathered chains. #6.
+    /// </summary>
+    [Fact]
+    public void Default_plan_mines_coal_not_biomass()
+    {
+        var request = new PlanRequest
+        {
+            Bias = PlanBias.Resources,
+            Byproducts = ByproductMode.AllowSink,
+        };
+        ExcludeManualParts(request);
+        request.Targets.Add(new PlanTarget("Steel Ingot", new Rational(60)));
+
+        var plan = FactoryPlanner.Plan(TestData.Database, request);
+
+        Assert.Equal(PlanStatus.Optimal, plan.Status);
+        Assert.True(plan.Supplies.ContainsKey("Coal"));
+        foreach (var manual in new[] { "Leaves", "Wood", "Mycelia", "Biomass" })
+            Assert.False(plan.Supplies.ContainsKey(manual), $"{manual} should not be supplied");
+        Assert.DoesNotContain(plan.Recipes, r => r.Recipe is "Biocoal" or "Charcoal");
+    }
+
+    /// <summary>A disabled recipe is never used by the planner. #5.</summary>
+    [Fact]
+    public void Disabled_recipe_is_absent_from_the_plan()
+    {
+        PlanRequest Build()
+        {
+            // Alternates off so the standard Steel Ingot recipe is the one used.
+            var r = new PlanRequest { Byproducts = ByproductMode.AllowSink };
+            DisableAlternates(r);
+            r.Targets.Add(new PlanTarget("Steel Ingot", new Rational(60)));
+            return r;
+        }
+
+        // Baseline: the standard Steel Ingot recipe is available and used.
+        var baseline = FactoryPlanner.Plan(TestData.Database, Build());
+        Assert.Equal(PlanStatus.Optimal, baseline.Status);
+        Assert.Contains(baseline.Recipes, r => r.Recipe == "Steel Ingot");
+
+        var request = Build();
+        request.DisabledRecipes.Add("Steel Ingot");
+        var plan = FactoryPlanner.Plan(TestData.Database, request);
+
+        Assert.Equal(PlanStatus.Optimal, plan.Status);
+        Assert.DoesNotContain(plan.Recipes, r => r.Recipe == "Steel Ingot");
+    }
+
+    /// <summary>
+    /// A banned part that the user nonetheless provisions still gets its capped
+    /// supply column (provision overrides the ban — the bug-order fix). #6.
+    /// </summary>
+    [Fact]
+    public void Banned_but_provisioned_part_supplies_up_to_its_cap()
+    {
+        var request = new PlanRequest { Byproducts = ByproductMode.AllowSink };
+        request.Targets.Add(new PlanTarget("Iron Plate", new Rational(20)));
+        request.BannedResources.Add("Iron Ore");
+        request.Provisions.Add(new PlanProvision("Iron Ore", new Rational(60)));
+
+        var plan = FactoryPlanner.Plan(TestData.Database, request);
+
+        Assert.Equal(PlanStatus.Optimal, plan.Status);
+        Assert.True(plan.Supplies.TryGetValue("Iron Ore", out var used));
+        Assert.True(used.IsPositive && used <= new Rational(60),
+            $"Provisioned Iron Ore should supply up to its cap, got {used}");
+    }
+
+    /// <summary>
+    /// With ore conversion disabled (default), no Converter Coal recipe appears
+    /// even when the planner is forced off mined coal; enabling it brings them
+    /// back. #6.
+    /// </summary>
+    [Fact]
+    public void Ore_conversion_toggle_adds_or_removes_converter_columns()
+    {
+        var conversionRecipes = FactoryPlanner.OreConversionRecipes(TestData.Database).ToHashSet();
+        Assert.Contains("Coal (Iron)", conversionRecipes);
+
+        PlanRequest Build()
+        {
+            // Target Coal directly with mining banned: the only remaining
+            // producers are the SAM ore-conversion recipes.
+            var r = new PlanRequest { Byproducts = ByproductMode.AllowSink };
+            ExcludeManualParts(r);
+            r.Targets.Add(new PlanTarget("Coal", new Rational(60)));
+            r.BannedResources.Add("Coal");
+            return r;
+        }
+
+        // Conversion OFF: every conversion recipe disabled -> no Converter coal,
+        // and with no other Coal producer the plan is infeasible.
+        var off = Build();
+        foreach (var name in conversionRecipes) off.DisabledRecipes.Add(name);
+        var offPlan = FactoryPlanner.Plan(TestData.Database, off);
+        Assert.Equal(PlanStatus.Infeasible, offPlan.Status);
+
+        // Conversion ON: the recipes are available, so the plan becomes feasible
+        // and uses a Converter coal recipe.
+        var on = Build();
+        var onPlan = FactoryPlanner.Plan(TestData.Database, on);
+        Assert.Equal(PlanStatus.Optimal, onPlan.Status);
+        Assert.Contains(onPlan.Recipes, r => conversionRecipes.Contains(r.Recipe));
     }
 
     [Fact]

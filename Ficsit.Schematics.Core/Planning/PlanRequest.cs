@@ -22,6 +22,10 @@ public sealed class PlanRequest
 
     public ByproductMode Byproducts { get; set; } = ByproductMode.Eliminate;
 
-    /// <summary>Include alternate recipes (default true — they make the magic happen).</summary>
-    public bool UseAlternateRecipes { get; set; } = true;
+    /// <summary>
+    /// Recipes (by name) the planner must not use. The UI's per-recipe enable
+    /// list and the "allow ore conversion" toggle both map onto this set when the
+    /// request is built — the planner itself learns no new concepts.
+    /// </summary>
+    public HashSet<string> DisabledRecipes { get; } = [];
 }

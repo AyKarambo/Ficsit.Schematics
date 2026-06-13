@@ -67,6 +67,30 @@ public class StoreTests : IDisposable
         Assert.Equal(3, reloaded.Numbers["value"].DecimalPlaces);
     }
 
+    [Fact]
+    public void Planner_settings_roundtrip()
+    {
+        using var store = new FicsitStore(_path);
+        var settings = store.LoadSettings();
+        // Defaults: exclude manual on, ore conversion off, nothing disabled.
+        Assert.True(settings.PlannerExcludeManualParts);
+        Assert.False(settings.PlannerAllowOreConversion);
+        Assert.Empty(settings.PlannerDisabledRecipes);
+
+        settings.PlannerExcludeManualParts = false;
+        settings.PlannerAllowOreConversion = true;
+        settings.PlannerDisabledRecipes.Add("Pure Iron Ingot");
+        settings.PlannerDisabledRecipes.Add("Solid Steel Ingot");
+        store.SaveSettings(settings);
+
+        var reloaded = store.LoadSettings();
+        Assert.False(reloaded.PlannerExcludeManualParts);
+        Assert.True(reloaded.PlannerAllowOreConversion);
+        Assert.Equal(2, reloaded.PlannerDisabledRecipes.Count);
+        Assert.Contains("Pure Iron Ingot", reloaded.PlannerDisabledRecipes);
+        Assert.Contains("Solid Steel Ingot", reloaded.PlannerDisabledRecipes);
+    }
+
     public void Dispose()
     {
         if (File.Exists(_path)) File.Delete(_path);
