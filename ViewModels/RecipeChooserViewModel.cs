@@ -100,11 +100,19 @@ public sealed partial class RecipeChooserViewModel : ObservableObject
             }
             if (!Matches(recipe, query)) continue;
             var iconPart = recipe.Outputs.FirstOrDefault()?.Part ?? recipe.Parts.FirstOrDefault()?.Part;
+            var outputIcons = recipe.Outputs
+                .Select(p => _icons.GetSource(p.Part))
+                .ToList();
+            var inputIcons = recipe.Inputs
+                .Select(p => _icons.GetSource(p.Part))
+                .ToList();
             Recipes.Add(new RecipeListItem
             {
                 Name = recipe.Name,
                 DisplayName = _loc.L(recipe.Name),
                 Icon = iconPart is not null ? _icons.GetSource(iconPart) : null,
+                OutputIcons = outputIcons.AsReadOnly(),
+                InputIcons = inputIcons.AsReadOnly(),
             });
         }
     }

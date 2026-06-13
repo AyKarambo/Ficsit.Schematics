@@ -322,9 +322,15 @@
                         <CollectionView.ItemTemplate>
                             <DataTemplate x:DataType="vm:RecipeListItem">
                                 <Border Style="{StaticResource ListRow}" Margin="0,2">
-                                    <Grid ColumnDefinitions="24,*" ColumnSpacing="6">
-                                        <Image Source="{Binding Icon}" WidthRequest="20" HeightRequest="20" VerticalOptions="Center" />
-                                        <Label Grid.Column="1" Text="{Binding DisplayName}" Style="{StaticResource RowLabel}" FontSize="11.5" LineBreakMode="TailTruncation" />
+                                    <Grid ColumnDefinitions="Auto,*" ColumnSpacing="6">
+                                        <HorizontalStackLayout Grid.Column="0" VerticalOptions="Center" Spacing="2" BindableLayout.ItemsSource="{Binding OutputIcons}">
+                                            <BindableLayout.ItemTemplate>
+                                                <DataTemplate x:DataType="x:Object">
+                                                    <Image Source="{Binding .}" WidthRequest="16" HeightRequest="16" />
+                                                </DataTemplate>
+                                            </BindableLayout.ItemTemplate>
+                                        </HorizontalStackLayout>
+                                        <Label Grid.Column="1" Text="{Binding DisplayName}" Style="{StaticResource RowLabel}" FontSize="11.5" LineBreakMode="TailTruncation" VerticalOptions="Center" />
                                     </Grid>
                                     <Border.GestureRecognizers>
                                         <TapGestureRecognizer Tapped="OnRecipeChosen" CommandParameter="{Binding Name}" />
