@@ -18,6 +18,22 @@ public sealed class NodeLayout
     public const float PortGap = 2f;
     public const float SpecialtySize = 44f;
 
+    /// <summary>Footprint of a map-snapped extractor badge: close to the marker (36 across).</summary>
+    public const float MapCompactSize = 46f;
+
+    /// <summary>Height of the single condensed value chip below the badge icon.</summary>
+    public const float MapCompactChipHeight = 16f;
+
+    /// <summary>Padded hit rect for the lone output port so it stays a comfortable touch target.</summary>
+    public const float MapCompactPortHit = 22f;
+
+    /// <summary>Below this zoom the badge hides its value chip and shows it on hover.</summary>
+    // TODO(ui-readability-ux #3): unify with the shared label-legibility zoom threshold.
+    public const float MapCompactChipZoomThreshold = 0.6f;
+
+    /// <summary>True when this layout is the compact map-snapped badge (drives the draw path).</summary>
+    public bool MapCompact { get; init; }
+
     public required FactoryNode Node { get; init; }
     public RectF Bounds { get; init; }
     public RectF ImageRect { get; init; }
@@ -28,10 +44,15 @@ public sealed class NodeLayout
     public List<PortInfo> Inputs { get; } = [];
     public List<PortInfo> Outputs { get; } = [];
 
-    public static NodeLayout Compute(FactoryNode node, GameDatabase data, FactoryGraph scope)
+    public static NodeLayout Compute(FactoryNode node, GameDatabase data, FactoryGraph scope, bool mapCompact = false)
     {
         var x = (float)node.X;
         var y = (float)node.Y;
+
+        // Map-snapped extractor: a marker-sized badge with one value chip and a
+        // single output port. Editing still happens through the popup.
+        if (mapCompact && node.Kind == NodeKind.Recipe && node.ResourceNodeId is not null)
+            return ComputeMapCompact(node, data, x, y);
 
         if (node.Kind is NodeKind.Outpost or NodeKind.Blueprint)
         {
@@ -81,6 +102,38 @@ public sealed class NodeLayout
         else
         {
             AddDynamicPorts(layout, node, scope, new RectF(x, y, CardWidth, imageHeight));
+        }
+        return layout;
+    }
+
+    /// <summary>
+    /// Marker-sized badge for a snapped extractor: square icon area, one condensed
+    /// value chip, and a single padded output port on the right edge. The output is
+    /// the recipe's first produced part (extractors have exactly one).
+    /// </summary>
+    private static NodeLayout ComputeMapCompact(FactoryNode node, GameDatabase data, float x, float y)
+    {
+        var box = new RectF(x, y, MapCompactSize, MapCompactSize);
+        var layout = new NodeLayout
+        {
+            Node = node,
+            MapCompact = true,
+            Bounds = box,
+            ImageRect = box.Inflate(-5, -5),
+            ValueRect = new RectF(x, y + MapCompactSize - MapCompactChipHeight, MapCompactSize, MapCompactChipHeight),
+            HasValueRow = true,
+            HasLimitRow = false,
+        };
+
+        var outputPart = Core.Saves.MapSnap.ExtractorOutputPart(data, node);
+        if (outputPart is not null)
+        {
+            // Padded hit rect centered on the right edge for an easy port-drag target.
+            var portTop = y + (MapCompactSize - MapCompactPortHit) / 2;
+            layout.Outputs.Add(new PortInfo(
+                outputPart,
+                new RectF(x + MapCompactSize - MapCompactPortHit / 2, portTop, MapCompactPortHit, MapCompactPortHit),
+                false));
         }
         return layout;
     }

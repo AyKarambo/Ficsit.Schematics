@@ -25,6 +25,12 @@ public sealed class FactoryCanvasDrawable(AppState state, IconStore icons, Numbe
     public RectF? RubberBand { get; set; }
     public (PointF Screen, string Text)? Tooltip { get; set; }
 
+    /// <summary>The resource marker a dragged extractor would snap to; drawn highlighted.</summary>
+    public ResourceNodeInfo? SnapPreviewMarker { get; set; }
+
+    /// <summary>True when the world map underlay and resource markers are active (root scope).</summary>
+    public bool MapActive => state.Settings.ShowMap && state.Editor.ScopePath.Count == 0;
+
     private readonly Dictionary<FactoryNode, NodeLayout> _layouts = [];
     private bool _layoutsDirty = true;
 
@@ -38,8 +44,9 @@ public sealed class FactoryCanvasDrawable(AppState state, IconStore icons, Numbe
             {
                 _layouts.Clear();
                 var scope = state.Editor.CurrentScope;
+                var mapCompact = MapActive;
                 foreach (var node in scope.Nodes)
-                    _layouts[node] = NodeLayout.Compute(node, state.Data, scope);
+                    _layouts[node] = NodeLayout.Compute(node, state.Data, scope, mapCompact);
                 _layoutsDirty = false;
             }
             return _layouts;
@@ -113,15 +120,24 @@ public sealed class FactoryCanvasDrawable(AppState state, IconStore icons, Numbe
             var p = MapGeometry.ToCanvas(node.X, node.Y);
             if (p.X < topLeft.X - 40 || p.X > bottomRight.X + 40
                 || p.Y < topLeft.Y - 40 || p.Y > bottomRight.Y + 40) continue;
-            DrawMapNode(canvas, node, p, occupied.Contains(node.Instance));
+            var isPreview = SnapPreviewMarker is not null && node.Instance == SnapPreviewMarker.Instance;
+            DrawMapNode(canvas, node, p, occupied.Contains(node.Instance), isPreview);
         }
     }
 
-    private void DrawMapNode(ICanvas canvas, ResourceNodeInfo node, PointF p, bool occupied)
+    private void DrawMapNode(ICanvas canvas, ResourceNodeInfo node, PointF p, bool occupied, bool isPreview = false)
     {
         var r = node.Kind == ResourceNodeKind.FrackingSatellite
             ? MapGeometry.MarkerRadius * 0.7f
             : MapGeometry.MarkerRadius;
+
+        // Snap-preview pulse: a wide accent ring so the target reads at a glance.
+        if (isPreview)
+        {
+            canvas.StrokeColor = CanvasTheme.Accent;
+            canvas.StrokeSize = 3f;
+            canvas.DrawCircle(p, r + 5f);
+        }
 
         canvas.FillColor = occupied
             ? CanvasTheme.AccentDeep.WithAlpha(0.85f)
@@ -287,6 +303,12 @@ public sealed class FactoryCanvasDrawable(AppState state, IconStore icons, Numbe
             return;
         }
 
+        if (layout.MapCompact)
+        {
+            DrawMapCompact(canvas, layout, nodeResult, selected);
+            return;
+        }
+
         // Card.
         canvas.FillColor = Theme.CardBackground;
         canvas.FillRoundedRectangle(layout.Bounds, corner);
@@ -359,6 +381,80 @@ public sealed class FactoryCanvasDrawable(AppState state, IconStore icons, Numbe
             if (sloop is not null)
                 canvas.DrawImage(sloop, layout.Bounds.Right - 14, layout.Bounds.Top + 2, 12, 12);
         }
+    }
+
+    /// <summary>
+    /// Compact map badge: rounded marker-sized card, machine icon, one condensed
+    /// value chip (hidden when zoomed too far out — shown on hover instead), and the
+    /// lone output port. Same selection ring as the full card.
+    /// </summary>
+    private void DrawMapCompact(ICanvas canvas, NodeLayout layout, NodeResult nodeResult, bool selected)
+    {
+        const float corner = 7f;
+        var node = layout.Node;
+        var showChip = Zoom >= NodeLayout.MapCompactChipZoomThreshold;
+
+        canvas.FillColor = Theme.CardBackground;
+        canvas.FillRoundedRectangle(layout.Bounds, corner);
+        if (showChip)
+        {
+            canvas.FillColor = Theme.ValueRowBackground;
+            canvas.FillRectangle(layout.ValueRect);
+        }
+        canvas.StrokeColor = selected ? Theme.SelectedBorder : Theme.CardBorder;
+        canvas.StrokeSize = selected ? 2f : 1f;
+        canvas.DrawRoundedRectangle(layout.Bounds, corner);
+
+        // Machine artwork sits above the chip; leave the chip band clear when shown.
+        var iconArea = showChip
+            ? new RectF(layout.ImageRect.X, layout.ImageRect.Y,
+                layout.ImageRect.Width, layout.Bounds.Bottom - NodeLayout.MapCompactChipHeight - layout.ImageRect.Y)
+            : layout.ImageRect;
+        var machineImage = icons.GetImage(MachineImageName(node));
+        if (machineImage is not null)
+        {
+            var rect = FitRect(iconArea, machineImage.Width / machineImage.Height);
+            canvas.DrawImage(machineImage, rect.X, rect.Y, rect.Width, rect.Height);
+        }
+
+        foreach (var port in layout.Outputs)
+            DrawCompactPort(canvas, port, nodeResult);
+
+        if (showChip)
+        {
+            canvas.FontColor = nodeResult.IsInvalid && state.Settings.FlagInvalidValues
+                ? Theme.InvalidText
+                : Theme.Text;
+            canvas.FontSize = 9.5f;
+            canvas.Font = Microsoft.Maui.Graphics.Font.DefaultBold;
+            var valueText = nodeResult.IsPpmDisplay
+                ? numbers.Value(nodeResult.DisplayValue) + "/min"
+                : numbers.Value(nodeResult.DisplayValue);
+            canvas.DrawString(valueText, layout.ValueRect, HorizontalAlignment.Center, VerticalAlignment.Center);
+        }
+
+        DrawTitle(canvas, layout, node);
+    }
+
+    /// <summary>The badge's single output port: a small chip centered in its padded hit rect.</summary>
+    private void DrawCompactPort(ICanvas canvas, PortInfo port, NodeResult nodeResult)
+    {
+        nodeResult.Outputs.TryGetValue(port.Part, out var portResult);
+        const float visual = 16f;
+        var rect = new RectF(
+            port.IconRect.Center.X - visual / 2,
+            port.IconRect.Center.Y - visual / 2,
+            visual, visual);
+
+        var chip = Theme.PortChip;
+        if (portResult is not null && portResult.Unused.IsPositive && portResult.Target.IsPositive)
+            chip = Theme.UnusedFlag;
+        canvas.FillColor = chip;
+        canvas.FillRoundedRectangle(rect, 4f);
+
+        var icon = icons.GetImage(port.Part);
+        if (icon is not null)
+            canvas.DrawImage(icon, rect.X + 1, rect.Y + 1, rect.Width - 2, rect.Height - 2);
     }
 
     private void DrawTitle(ICanvas canvas, NodeLayout layout, FactoryNode node)

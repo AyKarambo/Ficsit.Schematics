@@ -110,6 +110,7 @@ public partial class MainPage
                 _controller.DeleteSelection();
                 break;
             case Windows.System.VirtualKey.Escape:
+                _controller.Cancel();
                 HandleEscape();
                 break;
             case Windows.System.VirtualKey.Z when ctrl:

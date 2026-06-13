@@ -23,6 +23,11 @@ public sealed class CanvasController(AppState state, FactoryCanvasDrawable drawa
     private FactoryNode? _pressNode;
     private PortInfo? _pressPort;
     private NodeConnection? _detachedConnection;
+
+    // Phase 3 "drag out of a resource node": the free marker pressed on empty canvas,
+    // and the extractor created from it once the drag starts.
+    private ResourceNodeInfo? _pressMarker;
+    private FactoryNode? _dragOutNode;
     private DateTime _lastClickTime = DateTime.MinValue;
     private PointF _lastClickPoint;
     private FactoryNode? _lastClickNode;
@@ -48,7 +53,14 @@ public sealed class CanvasController(AppState state, FactoryCanvasDrawable drawa
         (_pressNode, var layout) = HitNode(world);
         _pressPort = layout?.HitPort(world);
         _detachedConnection = null;
+        _pressMarker = null;
+        _dragOutNode = null;
         _mode = Mode.Pressed;
+
+        // Drag-out-of-a-resource-node: an empty press over a free marker arms the
+        // gesture without disturbing pan-on-drag for misses.
+        if (!isRight && _pressNode is null && _pressPort is null && drawable.MapActive)
+            _pressMarker = FreeMarkerAt(world);
 
         if (!isRight && _pressPort is { IsInput: true } inputPort && _pressNode is not null)
         {
@@ -71,6 +83,8 @@ public sealed class CanvasController(AppState state, FactoryCanvasDrawable drawa
             {
                 if (_pressWasRight)
                     _mode = Mode.RubberBand;
+                else if (_pressMarker is not null && TryBeginDragOut(_pressMarker))
+                    _mode = Mode.Connect;
                 else if (_pressPort is not null)
                     _mode = Mode.Connect;
                 else if (_pressNode is not null)
@@ -101,8 +115,9 @@ public sealed class CanvasController(AppState state, FactoryCanvasDrawable drawa
                 {
                     state.Editor.MoveNodes(state.Selection, dx, dy);
                     drawable.InvalidateLayouts();
-                    Invalidate?.Invoke();
                 }
+                UpdateSnapPreview(world);
+                Invalidate?.Invoke();
                 break;
 
             case Mode.Connect:
@@ -132,6 +147,7 @@ public sealed class CanvasController(AppState state, FactoryCanvasDrawable drawa
         var world = drawable.ScreenToWorld(screen);
         var mode = _mode;
         _mode = Mode.Idle;
+        _pressMarker = null;
 
         switch (mode)
         {
@@ -140,14 +156,18 @@ public sealed class CanvasController(AppState state, FactoryCanvasDrawable drawa
                 break;
 
             case Mode.DragNodes:
+                drawable.SnapPreviewMarker = null;
                 state.Editor.Commands.BreakCoalescing();
                 SnapSelectionToGrid();
-                SnapToResourceNode();
+                SnapToResourceNode(world);
                 break;
 
             case Mode.Connect:
                 drawable.PendingWire = null;
-                CompleteConnection(world, screen);
+                if (_dragOutNode is not null)
+                    CompleteDragOut(world, screen);
+                else
+                    CompleteConnection(world, screen);
                 break;
 
             case Mode.RubberBand:
@@ -395,46 +415,38 @@ public sealed class CanvasController(AppState state, FactoryCanvasDrawable drawa
     }
 
     /// <summary>
-    /// Map mode: a dropped extractor latches onto the nearest free, compatible
-    /// resource node — the marker's purity is applied as the machine capacity.
-    /// Dragging it away again releases the node.
+    /// Map mode: a dropped extractor latches onto the matching free resource node
+    /// nearest the given reference point (the pointer during a drag) — the marker's
+    /// purity is applied as the machine capacity. Dragging it away releases the node.
+    /// The compact badge centers on the marker. Returns the marker snapped to, if any.
     /// </summary>
-    private void SnapToResourceNode()
+    private ResourceNodeInfo? SnapToResourceNode(PointF? reference = null, bool coalesce = false)
     {
-        if (!state.Settings.ShowMap || state.Editor.ScopePath.Count > 0) return;
-        if (state.Selection.Count != 1) return;
+        if (!drawable.MapActive) return null;
+        if (state.Selection.Count != 1) return null;
         var node = state.Selection[0];
-        if (node.Kind != NodeKind.Recipe) return;
+        if (node.Kind != NodeKind.Recipe) return null;
 
-        var center = NodeCenter(node);
-        ResourceNodeInfo? best = null;
-        var bestDistance = MapGeometry.SnapRadius;
+        var refPoint = reference ?? NodeCenter(node);
         var occupied = state.OccupiedResourceNodes();
-        foreach (var candidate in state.MapNodes)
-        {
-            if (!MatchesMapNode(node, candidate)) continue;
-            if (occupied.Contains(candidate.Instance) && node.ResourceNodeId != candidate.Instance) continue;
-            var p = MapGeometry.ToCanvas(candidate.X, candidate.Y);
-            var d = (float)Math.Sqrt((p.X - center.X) * (p.X - center.X) + (p.Y - center.Y) * (p.Y - center.Y));
-            if (d < bestDistance)
-            {
-                bestDistance = d;
-                best = candidate;
-            }
-        }
+        var best = MapSnap.NearestCandidate(state.Data, node, state.MapNodes, occupied, refPoint.X, refPoint.Y);
 
         if (best is null)
         {
             if (node.ResourceNodeId is not null)
                 state.Editor.SetProperty(node, "Release node", n => n.ResourceNodeId, (n, v) => n.ResourceNodeId = v, (string?)null);
-            return;
+            return null;
         }
 
+        // Center the actual (possibly compact) card on the marker.
+        var half = drawable.Layouts.TryGetValue(node, out var layout)
+            ? new SizeF(layout.Bounds.Width / 2, layout.Bounds.Height / 2)
+            : new SizeF(NodeLayout.CardWidth / 2, NodeLayout.ImageAreaHeight / 2);
         var marker = MapGeometry.ToCanvas(best.X, best.Y);
         state.Editor.MoveNodes([node],
-            marker.X - NodeLayout.CardWidth / 2 - node.X,
-            marker.Y - NodeLayout.ImageAreaHeight / 2 - node.Y,
-            coalesce: false);
+            marker.X - half.Width - node.X,
+            marker.Y - half.Height - node.Y,
+            coalesce: coalesce);
         if (node.ResourceNodeId != best.Instance)
             state.Editor.SetProperty(node, "Snap to node", n => n.ResourceNodeId, (n, v) => n.ResourceNodeId = v, (string?)best.Instance);
 
@@ -446,28 +458,143 @@ public sealed class CanvasController(AppState state, FactoryCanvasDrawable drawa
                 state.Editor.SetProperty(node, "Purity", n => n.Capacity, (n, v) => n.Capacity = v, (string?)best.Purity);
         }
         drawable.InvalidateLayouts();
-    }
-
-    /// <summary>Can this recipe machine sit on that map resource node?</summary>
-    private bool MatchesMapNode(FactoryNode node, ResourceNodeInfo map)
-    {
-        if (!state.Data.RecipesByName.TryGetValue(node.Name, out var recipe)) return false;
-        var family = state.Data.MultiMachineFor(recipe.Machine)?.Name ?? recipe.Machine;
-        return map.Kind switch
-        {
-            ResourceNodeKind.Geyser => family == "Geothermal Generator",
-            ResourceNodeKind.FrackingCore => recipe.Machine == "Resource Well Pressurizer",
-            ResourceNodeKind.FrackingSatellite => recipe.Machine == "Resource Well Extractor"
-                && recipe.Outputs.Any(o => o.Part == map.Part),
-            _ => (family == "Miner" || recipe.Machine == "Oil Extractor")
-                && recipe.Outputs.Any(o => o.Part == map.Part),
-        };
+        return best;
     }
 
     private PointF NodeCenter(FactoryNode node)
         => drawable.Layouts.TryGetValue(node, out var layout)
             ? layout.Bounds.Center
             : new PointF((float)node.X + NodeLayout.CardWidth / 2, (float)node.Y + NodeLayout.ImageAreaHeight / 2);
+
+    /// <summary>While dragging a single extractor in map mode, highlight the marker it would snap to.</summary>
+    private void UpdateSnapPreview(PointF world)
+    {
+        if (!drawable.MapActive || state.Selection.Count != 1
+            || state.Selection[0].Kind != NodeKind.Recipe)
+        {
+            drawable.SnapPreviewMarker = null;
+            return;
+        }
+        drawable.SnapPreviewMarker = MapSnap.NearestCandidate(
+            state.Data, state.Selection[0], state.MapNodes, state.OccupiedResourceNodes(), world.X, world.Y);
+    }
+
+    /// <summary>An unoccupied resource marker under the world point (a touch larger than the icon).</summary>
+    private ResourceNodeInfo? FreeMarkerAt(PointF world)
+    {
+        var occupied = state.OccupiedResourceNodes();
+        ResourceNodeInfo? best = null;
+        var bestDistance = MapGeometry.MarkerRadius + 6f;
+        foreach (var marker in state.MapNodes)
+        {
+            if (occupied.Contains(marker.Instance)) continue;
+            var p = MapGeometry.ToCanvas(marker.X, marker.Y);
+            var dx = p.X - world.X;
+            var dy = p.Y - world.Y;
+            var d = (float)Math.Sqrt(dx * dx + dy * dy);
+            if (d < bestDistance)
+            {
+                bestDistance = d;
+                best = marker;
+            }
+        }
+        return best;
+    }
+
+    /// <summary>
+    /// Phase 3: create the matching extractor for a bare marker, snap it (purity
+    /// adopted) and hand the new node's output port to the connect drag — all inside
+    /// one undo group so a single Ctrl+Z removes the machine and its wire together.
+    /// Returns false (gesture aborts to pan) when no recipe fits the marker.
+    /// </summary>
+    private bool TryBeginDragOut(ResourceNodeInfo marker)
+    {
+        var recipeName = MapSnap.RecipeForMarker(state.Data, marker);
+        if (recipeName is null) return false;
+
+        state.Editor.Commands.BeginGroup("Extract from node");
+        var p = MapGeometry.ToCanvas(marker.X, marker.Y);
+        var node = state.Editor.AddNode(recipeName, p.X, p.Y);
+        ApplyMachineDefaults(node);
+        state.SetSelection([node]);
+        drawable.InvalidateLayouts();
+        // Snap centers the compact badge on the marker and adopts purity.
+        SnapToResourceNode(p);
+
+        if (!drawable.Layouts.TryGetValue(node, out var layout)
+            || layout.Outputs.Count == 0)
+        {
+            state.Editor.Commands.CancelGroup();
+            state.ClearSelection();
+            return false;
+        }
+
+        _dragOutNode = node;
+        _pressNode = node;
+        _pressPort = layout.Outputs[0];
+        return true;
+    }
+
+    /// <summary>Apply the user's per-family default variant to a freshly created machine, if set.</summary>
+    private void ApplyMachineDefaults(FactoryNode node)
+    {
+        if (node.Kind != NodeKind.Recipe
+            || !state.Data.RecipesByName.TryGetValue(node.Name, out var recipe)) return;
+        var family = state.Data.MultiMachineFor(recipe.Machine);
+        if (family is null) return;
+        var setting = state.Settings.MachineDefaults.FirstOrDefault(m => m.Name == family.Name);
+        if (setting?.DefaultMachine is { Length: > 0 } variant
+            && family.Machines.Any(v => v.Name == variant))
+            state.Editor.SetProperty(node, "Machine", n => n.MachineVariant, (n, v) => n.MachineVariant = v, (string?)variant);
+    }
+
+    /// <summary>Finish the drag-out gesture: wire to a target input, or open the filtered chooser.</summary>
+    private void CompleteDragOut(PointF world, PointF screen)
+    {
+        var node = _dragOutNode!;
+        var port = _pressPort!;
+        _dragOutNode = null;
+
+        var (targetNode, targetLayout) = HitNode(world);
+        var targetPort = targetLayout?.HitPort(world);
+
+        if (targetNode is not null && targetNode != node
+            && TryResolveEndpoints(node, port, targetNode, targetPort, out var from, out var part, out var to))
+        {
+            state.Editor.Connect(from!, part!, to!);
+            state.Editor.Commands.EndGroup();
+            drawable.InvalidateLayouts();
+            return;
+        }
+
+        if (targetNode is null)
+        {
+            // Empty canvas: keep the extractor, close the group, then offer the chooser.
+            state.Editor.Commands.EndGroup();
+            OpenChooserForPort?.Invoke(new PortDragContext(node, port.Part, !port.IsInput), screen);
+            return;
+        }
+
+        // Dropped on something incompatible (or the node itself): keep just the extractor.
+        state.Editor.Commands.EndGroup();
+    }
+
+    /// <summary>Esc / cancel during a drag-out removes the just-created extractor as one step.</summary>
+    public void Cancel()
+    {
+        if (_mode == Mode.Connect && _dragOutNode is not null)
+        {
+            state.Editor.Commands.CancelGroup();
+            state.ClearSelection();
+            _dragOutNode = null;
+        }
+        _mode = Mode.Idle;
+        _pressMarker = null;
+        drawable.PendingWire = null;
+        drawable.SnapPreviewMarker = null;
+        drawable.RubberBand = null;
+        Invalidate?.Invoke();
+    }
 
     private void SnapSelectionToGrid()
     {
@@ -514,7 +641,12 @@ public sealed class CanvasController(AppState state, FactoryCanvasDrawable drawa
         if (node is not null && layout is not null)
         {
             var result = state.Editor.Result.For(node);
-            if (layout.HasValueRow && layout.ValueRect.Contains(world))
+            // On a compact badge the chip may be hidden (zoomed out); surface the
+            // value anywhere on the badge that is not the output port.
+            var valueHit = layout.MapCompact
+                ? layout.Bounds.Contains(world) && layout.HitPort(world) is null
+                : layout.HasValueRow && layout.ValueRect.Contains(world);
+            if (valueHit)
             {
                 var machineName = node.Kind == NodeKind.Recipe
                     && state.Data.RecipesByName.TryGetValue(node.Name, out var recipe)
