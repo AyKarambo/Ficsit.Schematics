@@ -343,10 +343,12 @@
             </Grid>
         </Border>
 
-        <!-- ====================== machine editor popover ====================== -->
+        <!-- ====================== machine editor (right-docked side panel) ====================== -->
         <Border x:Name="MachinePopup" Style="{StaticResource Panel}" IsVisible="False"
-                HorizontalOptions="Start" VerticalOptions="Start" WidthRequest="290">
-            <VerticalStackLayout Spacing="7">
+                HorizontalOptions="End" VerticalOptions="Start" Margin="12,60,12,12" WidthRequest="300">
+            <ScrollView MaximumHeightRequest="640">
+                <!-- right gutter so the WinUI overlay scrollbar clears the content -->
+                <VerticalStackLayout Spacing="7" Padding="0,0,14,0">
                 <Grid ColumnDefinitions="28,*,Auto" ColumnSpacing="8">
                     <Image x:Name="PopupIcon" WidthRequest="24" HeightRequest="24" VerticalOptions="Center" />
                     <Label x:Name="PopupName" Grid.Column="1" Style="{StaticResource PanelTitle}" FontSize="13.5" LineBreakMode="TailTruncation" />
@@ -421,14 +423,16 @@
                     <Button x:Name="PopupPasteButton" Grid.Column="2" Style="{StaticResource IconButton}" Text="&#xE77F;" Clicked="OnPasteClicked" />
                     <Button x:Name="PopupDeleteButton" Grid.Column="4" Style="{StaticResource DangerButton}" Text="&#xE74D;" Clicked="OnPopupDeleteClicked" />
                 </Grid>
-            </VerticalStackLayout>
+                </VerticalStackLayout>
+            </ScrollView>
         </Border>
 
         <!-- ====================== settings panel ====================== -->
         <Border x:Name="SettingsPanel" Style="{StaticResource Panel}" IsVisible="False"
                 HorizontalOptions="End" VerticalOptions="Start" Margin="12,60,12,12" WidthRequest="330">
             <ScrollView MaximumHeightRequest="600">
-                <VerticalStackLayout Spacing="7">
+                <!-- right gutter so the WinUI overlay scrollbar clears the content -->
+                <VerticalStackLayout Spacing="7" Padding="0,0,14,0">
                     <Label x:Name="SettingsTitle" Style="{StaticResource PanelTitle}" />
 
                     <Label x:Name="SettingsGeneralHeader" Style="{StaticResource SectionHeader}" />
@@ -520,11 +524,11 @@
                     <Button x:Name="SaveAsButton" Grid.Column="1" Style="{StaticResource AccentButton}" Clicked="OnSaveAsClicked" />
                 </Grid>
                 <ScrollView MaximumHeightRequest="240">
-                    <VerticalStackLayout x:Name="SavesList" Spacing="4" />
+                    <VerticalStackLayout x:Name="SavesList" Spacing="4" Padding="0,0,14,0" />
                 </ScrollView>
                 <Label x:Name="BackupsHeader" Style="{StaticResource SectionHeader}" />
                 <ScrollView MaximumHeightRequest="200">
-                    <VerticalStackLayout x:Name="BackupsList" Spacing="4" />
+                    <VerticalStackLayout x:Name="BackupsList" Spacing="4" Padding="0,0,14,0" />
                 </ScrollView>
             </VerticalStackLayout>
         </Border>
@@ -533,7 +537,8 @@
         <Border x:Name="AutoPlanPanel" Style="{StaticResource Panel}" IsVisible="False"
                 HorizontalOptions="End" VerticalOptions="Start" Margin="12,60,12,12" WidthRequest="380">
             <ScrollView MaximumHeightRequest="640">
-                <VerticalStackLayout Spacing="7">
+                <!-- right gutter so the WinUI overlay scrollbar clears the content -->
+                <VerticalStackLayout Spacing="7" Padding="0,0,14,0">
                     <Label x:Name="AutoPlanTitle" Style="{StaticResource PanelTitle}" />
 
                     <Label x:Name="PlanTargetsHeader" Style="{StaticResource SectionHeader}" />
@@ -623,7 +628,7 @@
                             Clicked="OnRecipeListFromSave" />
                 </FlexLayout>
                 <ScrollView Grid.Row="3">
-                    <VerticalStackLayout x:Name="RecipeListItems" Spacing="2" />
+                    <VerticalStackLayout x:Name="RecipeListItems" Spacing="2" Padding="0,0,14,0" />
                 </ScrollView>
             </Grid>
         </Border>

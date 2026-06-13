@@ -8,16 +8,82 @@ namespace Ficsit.Schematics;
 /// <summary>Machine editor popover and the inline limit editor.</summary>
 public partial class MainPage
 {
+    // Docked right-side panel geometry: WidthRequest + outer Margins (12,60,12,12).
+    private const float MachinePanelWidth = 300f;
+    private const float MachinePanelMargin = 12f;
+    private const float MachinePanelTop = 60f;
+    // Keep this much empty canvas between a node and the panel's left edge.
+    private const float NodeRevealMargin = 24f;
+
     private void ShowMachinePopup(FactoryNode node, PointF screen)
     {
-        CloseOverlays();
+        var wasOpen = MachinePopup.IsVisible;
+        if (!wasOpen) CloseOverlays();
         _popupNode = node;
         PopulateMachinePopup(node);
-
-        var position = ClampToPage(screen, 290, 430);
-        MachinePopup.TranslationX = position.X;
-        MachinePopup.TranslationY = position.Y;
         MachinePopup.IsVisible = true;
+        EnsureNodeClearOfPanel(node);
+    }
+
+    /// <summary>
+    /// Live retarget: while the docked editor is open, selecting a different single
+    /// node rebinds the panel to it (re-populate + re-pan) without closing.
+    /// </summary>
+    private void RetargetMachinePopup()
+    {
+        if (!MachinePopup.IsVisible) return;
+        // Empty canvas click (or entering an outpost) clears the selection → close.
+        if (_state.Selection.Count == 0)
+        {
+            MachinePopup.IsVisible = false;
+            _popupNode = null;
+            return;
+        }
+        if (_state.Selection.Count != 1) return;
+        var node = _state.Selection[0];
+        if (node == _popupNode) return;
+        ShowMachinePopup(node, default);
+    }
+
+    /// <summary>
+    /// Auto-pan so <paramref name="node"/> is never hidden under the docked editor
+    /// panel: if the node's screen rect intersects the panel's screen rect, shift
+    /// the view by the minimum delta to bring it fully into the region left of the
+    /// panel (plus a small margin). No-op if the node already fits.
+    /// </summary>
+    private void EnsureNodeClearOfPanel(FactoryNode node)
+    {
+        if (!_drawable.Layouts.TryGetValue(node, out var layout)) return;
+
+        var pageW = (float)Width;
+        var pageH = (float)Height;
+        if (pageW <= 0 || pageH <= 0) return;
+
+        // Node's on-screen rect from its world bounds.
+        var topLeft = _drawable.WorldToScreen(new PointF(layout.Bounds.Left, layout.Bounds.Top));
+        var bottomRight = _drawable.WorldToScreen(new PointF(layout.Bounds.Right, layout.Bounds.Bottom));
+        var nodeRect = new RectF(topLeft.X, topLeft.Y,
+            bottomRight.X - topLeft.X, bottomRight.Y - topLeft.Y);
+
+        // Panel's on-screen rect (anchored End, full-ish height).
+        var panelLeft = pageW - MachinePanelMargin - MachinePanelWidth;
+        var panelRect = new RectF(panelLeft, MachinePanelTop,
+            MachinePanelWidth + MachinePanelMargin, pageH - MachinePanelTop);
+
+        if (!nodeRect.IntersectsWith(panelRect)) return;
+
+        // Minimum horizontal shift to push the node's right edge left of the panel.
+        var dx = panelLeft - NodeRevealMargin - nodeRect.Right;
+        // Don't shove the node off the left edge; clamp so its left stays visible.
+        if (nodeRect.Left + dx < NodeRevealMargin)
+            dx = NodeRevealMargin - nodeRect.Left;
+
+        // Vertical nudge only if the node sits above the panel's top band.
+        float dy = 0;
+        if (nodeRect.Top < MachinePanelTop)
+            dy = MachinePanelTop + NodeRevealMargin - nodeRect.Top;
+
+        _controller.PanBy(dx, dy);
     }
 
     private void PopulateMachinePopup(FactoryNode node)
@@ -299,8 +365,10 @@ public partial class MainPage
 
     private void OnPasteClicked(object? sender, EventArgs e)
     {
-        var screen = new PointF((float)MachinePopup.TranslationX, (float)MachinePopup.TranslationY);
-        var world = _drawable.ScreenToWorld(screen);
+        // Offset from the edited node when present, else the viewport centre.
+        var world = _popupNode is not null && _drawable.Layouts.TryGetValue(_popupNode, out var layout)
+            ? new PointF(layout.Bounds.Left, layout.Bounds.Top)
+            : _drawable.ScreenToWorld(new PointF((float)Width / 2, (float)Height / 2));
         var pasted = _state.Editor.Paste(world.X + 30, world.Y + 30);
         _state.SetSelection(pasted);
         MachinePopup.IsVisible = false;

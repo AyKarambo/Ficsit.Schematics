@@ -38,7 +38,9 @@ public sealed class CanvasController(AppState state, FactoryCanvasDrawable drawa
     public event Action<FactoryNode>? EnterOutpostRequested;
     public event Action<FactoryNode, NodeLayout>? EditLimitRequested;
     public event Action? Invalidate;
-    public event Action? CloseOverlays;
+    // Press-time close: dismisses the transient panels (chooser, settings, …) but
+    // leaves the docked machine editor for the click/selection logic to retarget.
+    public event Action? CloseTransientOverlays;
 
     private float DragThreshold => Math.Max(2, state.Settings.DragSensitivity / 4f);
 
@@ -46,7 +48,7 @@ public sealed class CanvasController(AppState state, FactoryCanvasDrawable drawa
 
     public void PointerPressed(PointF screen, bool isRight, bool ctrl)
     {
-        CloseOverlays?.Invoke();
+        CloseTransientOverlays?.Invoke();
         _pressScreen = _lastScreen = screen;
         _pressWasRight = isRight;
         var world = drawable.ScreenToWorld(screen);
@@ -392,6 +394,19 @@ public sealed class CanvasController(AppState state, FactoryCanvasDrawable drawa
         state.Editor.DeleteNodes(state.Selection.ToList());
         state.ClearSelection();
         drawable.InvalidateLayouts();
+        Invalidate?.Invoke();
+    }
+
+    /// <summary>
+    /// Shift the view by a screen-space delta and persist it. Used by the docked
+    /// machine editor to nudge a node out from under the panel.
+    /// </summary>
+    public void PanBy(float dx, float dy)
+    {
+        if (dx == 0 && dy == 0) return;
+        drawable.PanX += dx;
+        drawable.PanY += dy;
+        SyncPanToDocument();
         Invalidate?.Invoke();
     }
 

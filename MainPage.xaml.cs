@@ -64,18 +64,19 @@ public partial class MainPage : ContentPage
             Canvas.Invalidate();
             UpdateStatus();
         };
-        _controller.OpenRecipeChooser += ShowChooserAt;
+        _controller.OpenRecipeChooser += screen => ShowChooserAt(screen);
         _controller.OpenChooserForPort += ShowChooserForPort;
         _controller.OpenMachinePopup += ShowMachinePopup;
         _controller.EnterOutpostRequested += node => _state.Editor.EnterOutpost(node);
         _controller.EditLimitRequested += ShowLimitEditor;
-        _controller.CloseOverlays += CloseOverlays;
+        _controller.CloseTransientOverlays += CloseTransientOverlays;
 
         _state.Editor.Solved += OnSolved;
         _state.Editor.DocumentReplaced += OnDocumentReplaced;
         _state.SelectionChanged += () =>
         {
             if (SummaryPanel.IsVisible) Summary.Refresh();
+            RetargetMachinePopup();
             Canvas.Invalidate();
         };
         _state.MapNodesChanged += () =>
@@ -404,6 +405,23 @@ public partial class MainPage : ContentPage
         RecipeListPanel.IsVisible = false;
         CommitLimitEditor();
         _popupNode = null;
+        _pendingPortConnect = null;
+    }
+
+    /// <summary>
+    /// Press-time dismiss: closes every panel EXCEPT the docked machine editor,
+    /// which the click/selection logic retargets or closes itself so it can stay
+    /// open while the user clicks from one machine node to the next.
+    /// </summary>
+    private void CloseTransientOverlays()
+    {
+        ChooserPanel.IsVisible = false;
+        SettingsPanel.IsVisible = false;
+        SavesPanel.IsVisible = false;
+        AutoPlanPanel.IsVisible = false;
+        PartPickerPanel.IsVisible = false;
+        RecipeListPanel.IsVisible = false;
+        CommitLimitEditor();
         _pendingPortConnect = null;
     }
 
