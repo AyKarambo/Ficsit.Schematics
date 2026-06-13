@@ -26,6 +26,12 @@ public sealed class CanvasTheme
     public required Color TooltipBorder { get; init; }
     public required Color TooltipText { get; init; }
 
+    /// <summary>Background pill behind port and connection ppm labels.</summary>
+    public required Color LabelPillBackground { get; init; }
+
+    /// <summary>Text on top of the port/connection label pill.</summary>
+    public required Color LabelPillText { get; init; }
+
     /// <summary>FICSIT orange, the app accent.</summary>
     public static readonly Color Accent = Color.FromArgb("#F89B4B");
     public static readonly Color AccentDeep = Color.FromArgb("#E8772E");
@@ -51,6 +57,10 @@ public sealed class CanvasTheme
         TooltipBackground = Color.FromArgb("#262626"),
         TooltipBorder = Color.FromArgb("#454545"),
         TooltipText = Color.FromArgb("#F2F2F2"),
+        // Semi-transparent graphite pill: readable on the dark canvas (#121212) and
+        // grid dots; white text gives ~7:1 contrast ratio against the pill fill.
+        LabelPillBackground = Color.FromArgb("#CC1E1E1E"),
+        LabelPillText = Color.FromArgb("#F2F2F2"),
     };
 
     public static readonly CanvasTheme Light = new()
@@ -74,5 +84,9 @@ public sealed class CanvasTheme
         TooltipBackground = Colors.White,
         TooltipBorder = Color.FromArgb("#D0D0D0"),
         TooltipText = Color.FromArgb("#1A1A1A"),
+        // Light-mode pill: near-white translucent surface on the pale canvas (#FAFAFA);
+        // dark text gives ~8:1 contrast ratio against the pill fill.
+        LabelPillBackground = Color.FromArgb("#E6F5F5F5"),
+        LabelPillText = Color.FromArgb("#1A1A1A"),
     };
 }

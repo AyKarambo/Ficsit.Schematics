@@ -247,19 +247,22 @@ public sealed class FactoryCanvasDrawable(AppState state, IconStore icons, Numbe
         }
         canvas.DrawPath(path);
 
-        // Mid label: part icon + flow ppm.
+        // Mid label: part icon + flow ppm — pill treatment (Slice B #3).
         var flow = result.FlowOf(connection);
         var icon = icons.GetImage(connection.Part);
         const float iconSize = 16f;
         if (icon is not null)
             canvas.DrawImage(icon, mid.X - iconSize - 2, mid.Y - iconSize / 2, iconSize, iconSize);
-        canvas.FontColor = Theme.Text;
-        canvas.FontSize = 10f;
-        canvas.Font = Microsoft.Maui.Graphics.Font.DefaultBold;
-        canvas.DrawString(numbers.Connection(flow), mid.X, mid.Y - 8, 60, 16,
-            HorizontalAlignment.Left, VerticalAlignment.Center);
+        // The label sits to the right of the icon, centred on mid.Y.
+        DrawLabelPill(canvas, numbers.Connection(flow), mid.X, mid.Y, anchorRight: false);
     }
 
+    /// <summary>
+    /// Hit / exclusion rect for the connection mid-label pill. The pill's exact size
+    /// depends on the measured text, but for hit-testing a fixed conservative estimate
+    /// is sufficient — slightly wider than a 5-digit ppm value at label font size.
+    /// Kept in sync with <see cref="DrawConnection"/>: same mid-point, same icon offset.
+    /// </summary>
     public RectF ConnectionLabelRect(NodeConnection connection)
     {
         var layouts = Layouts;
@@ -269,7 +272,10 @@ public sealed class FactoryCanvasDrawable(AppState state, IconStore icons, Numbe
         var start = new PointF(fromLayout.Bounds.Right, fromLayout.Bounds.Center.Y);
         var end = new PointF(toLayout.Bounds.Left, toLayout.Bounds.Center.Y);
         var mid = new PointF((start.X + end.X) / 2, (start.Y + end.Y) / 2);
-        return new RectF(mid.X - 22, mid.Y - 12, 80, 24);
+        // Icon sits at [mid.X - 18, mid.Y - 8]; pill starts at mid.X (anchorRight:false).
+        // Estimate: icon + pill together span ~70 wide, ~18 tall, centred on mid.Y.
+        const float iconSize = 16f;
+        return new RectF(mid.X - iconSize - 4, mid.Y - 9, iconSize + 70, 18);
     }
 
     private static PointF BezierPoint(PointF p0, PointF p1, PointF p2, PointF p3, float t)
@@ -489,19 +495,26 @@ public sealed class FactoryCanvasDrawable(AppState state, IconStore icons, Numbe
         if (icon is not null)
             canvas.DrawImage(icon, port.IconRect.X + 1, port.IconRect.Y + 1, port.IconRect.Width - 2, port.IconRect.Height - 2);
 
-        // ppm label outside the card.
-        if (portResult is not null && portResult.Target.IsPositive)
+        // ppm label outside the card — rendered as a measured pill (Slice B #3).
+        // Hidden when zoomed out far enough that pills would collide with neighbours;
+        // hover still surfaces the value via the tooltip path (TooltipTextAt covers port rects).
+        if (portResult is not null && portResult.Target.IsPositive
+            && Zoom >= NodeLayout.LabelHideZoomThreshold)
         {
-            canvas.FontColor = Theme.Text;
-            canvas.FontSize = 9.5f;
-            canvas.Font = Microsoft.Maui.Graphics.Font.DefaultBold;
             var text = numbers.Connection(portResult.Target);
+            var labelCenterY = port.IconRect.Center.Y;
             if (port.IsInput)
-                canvas.DrawString(text, port.IconRect.Left - 64, port.IconRect.Top, 60, port.IconRect.Height,
-                    HorizontalAlignment.Right, VerticalAlignment.Center);
+            {
+                // Pill sits to the left of the port chip with a 2-unit gap.
+                var anchorRight = port.IconRect.Left - 2f;
+                DrawLabelPill(canvas, text, anchorRight, labelCenterY, anchorRight: true);
+            }
             else
-                canvas.DrawString(text, port.IconRect.Right + 4, port.IconRect.Top, 60, port.IconRect.Height,
-                    HorizontalAlignment.Left, VerticalAlignment.Center);
+            {
+                // Pill sits to the right of the port chip with a 2-unit gap.
+                var anchorLeft = port.IconRect.Right + 2f;
+                DrawLabelPill(canvas, text, anchorLeft, labelCenterY, anchorRight: false);
+            }
         }
     }
 
@@ -542,6 +555,40 @@ public sealed class FactoryCanvasDrawable(AppState state, IconStore icons, Numbe
             width = height * aspect;
         }
         return new RectF(area.Center.X - width / 2, area.Center.Y - height / 2, width, height);
+    }
+
+    // ------------------------------------------------------------- label pills
+
+    /// <summary>
+    /// Measures <paramref name="text"/> at the clamped label font size, draws a
+    /// rounded-rectangle pill sized to the text, then the text on top — replacing
+    /// the legacy fixed-width boxes (Slice B — #3).
+    ///
+    /// The pill is anchored either with its right edge at <paramref name="x"/> (when
+    /// <paramref name="anchorRight"/> is true, i.e. input-side labels) or with its
+    /// left edge at <paramref name="x"/> (output-side and connection labels).
+    /// </summary>
+    private void DrawLabelPill(ICanvas canvas, string text, float x, float centerY, bool anchorRight)
+    {
+        // Clamp the font upward so effective on-screen size never drops below the
+        // minimum legible pixel height (LabelMinEffectivePx / Zoom restores world units).
+        var fontSize = MathF.Max(NodeLayout.LabelFontSize, NodeLayout.LabelMinEffectivePx / Zoom);
+        var font = Microsoft.Maui.Graphics.Font.DefaultBold;
+
+        var textSize = canvas.GetStringSize(text, font, fontSize);
+        var pillW = textSize.Width + NodeLayout.LabelPillPadX * 2;
+        var pillH = textSize.Height + NodeLayout.LabelPillPadY * 2;
+        var pillX = anchorRight ? x - pillW : x;
+        var pillY = centerY - pillH / 2;
+        var pillRect = new RectF(pillX, pillY, pillW, pillH);
+
+        canvas.FillColor = Theme.LabelPillBackground;
+        canvas.FillRoundedRectangle(pillRect, NodeLayout.LabelPillCorner);
+
+        canvas.FontColor = Theme.LabelPillText;
+        canvas.FontSize = fontSize;
+        canvas.Font = font;
+        canvas.DrawString(text, pillRect, HorizontalAlignment.Center, VerticalAlignment.Center);
     }
 
     // --------------------------------------------------------------- adorners

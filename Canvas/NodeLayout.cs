@@ -28,8 +28,38 @@ public sealed class NodeLayout
     public const float MapCompactPortHit = 22f;
 
     /// <summary>Below this zoom the badge hides its value chip and shows it on hover.</summary>
-    // TODO(ui-readability-ux #3): unify with the shared label-legibility zoom threshold.
+    // TODO(ui-readability-ux #3): potentially unify with LabelHideZoomThreshold below.
     public const float MapCompactChipZoomThreshold = 0.6f;
+
+    // ---- port / connection label-pill constants (Slice B — #3) ----------------
+
+    /// <summary>Base font size for port and connection ppm labels (world units).</summary>
+    public const float LabelFontSize = 9.5f;
+
+    /// <summary>
+    /// Minimum on-screen pixel size for label text. When <c>LabelFontSize × Zoom</c>
+    /// drops below this value the font is clamped upward so labels stay legible.
+    /// </summary>
+    public const float LabelMinEffectivePx = 8f;
+
+    /// <summary>
+    /// Below this zoom level, even a size-clamped pill would collide with a
+    /// neighbouring node's labels, so port labels are hidden entirely and surfaced
+    /// on hover instead. Chosen so a typical inter-node gap (≥20 world units) can
+    /// still contain the pill at this zoom; below it the pill overflows.
+    /// Could later unify with MapCompactChipZoomThreshold (0.6) once a shared
+    /// legibility threshold is formalised (ui-readability-ux #3 backlog).
+    /// </summary>
+    public const float LabelHideZoomThreshold = 0.4f;
+
+    /// <summary>Horizontal padding added to each side of the measured text inside a label pill.</summary>
+    public const float LabelPillPadX = 3f;
+
+    /// <summary>Vertical padding added to each side of the measured text inside a label pill.</summary>
+    public const float LabelPillPadY = 1.5f;
+
+    /// <summary>Corner radius of label pills.</summary>
+    public const float LabelPillCorner = 3f;
 
     /// <summary>True when this layout is the compact map-snapped badge (drives the draw path).</summary>
     public bool MapCompact { get; init; }
