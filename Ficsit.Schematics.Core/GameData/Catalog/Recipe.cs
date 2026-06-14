@@ -1,3 +1,5 @@
+using Ficsit.Schematics.Core.Numerics;
+
 namespace Ficsit.Schematics.Core.GameData.Catalog;
 
 /// <summary>
@@ -9,7 +11,7 @@ public sealed record Recipe(
     int Sort,
     string Name,
     string Batch,
-    string Tier,
+    Tier Tier,
     IReadOnlyList<RecipePart> Parts,
     bool Alternate = false,
     bool Ficsmas = false,
@@ -22,12 +24,12 @@ public sealed record Recipe(
     {
         Name = Name,
         Machine = machine,
-        BatchTime = Batch,
+        BatchTime = Rational.Parse(Batch),
         Tier = Tier,
         Alternate = Alternate,
         Ficsmas = Ficsmas,
-        AveragePower = AveragePower,
-        MinPower = MinPower,
+        AveragePower = AveragePower is null ? null : Rational.Parse(AveragePower),
+        MinPower = MinPower is null ? null : Rational.Parse(MinPower),
         IgnoreInputMultiplier = IgnoreInputMultiplier,
         SpaceElevatorMultiplier = SpaceElevatorMultiplier,
         Parts = Parts.ToList(),

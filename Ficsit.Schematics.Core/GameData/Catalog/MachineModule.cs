@@ -1,9 +1,13 @@
+using Ficsit.Schematics.Core.Numerics;
+
 namespace Ficsit.Schematics.Core.GameData.Catalog;
 
 /// <summary>
 /// A group of machines for one category, authored as <see cref="MachineGroup"/>s so a
 /// multi-machine family lives next to the machine(s) it describes. Discovered via
 /// reflection by <see cref="GameDataCatalog"/>; each entry carries its canonical sort key.
+/// Quantity arguments are written as canonical fraction strings and parsed to exact
+/// <see cref="Rational"/> values.
 /// </summary>
 public abstract class MachineModule
 {
@@ -32,7 +36,7 @@ public abstract class MachineModule
 
     /// <summary>A standalone machine. Pass <c>overclockExp: null</c> for machines with no
     /// overclock scaling, or <c>"1"</c> for generators (linear).</summary>
-    protected static MachineGroup Machine(int sort, string name, string tier,
+    protected static MachineGroup Machine(int sort, string name, Tier tier,
         string? power = null, string? minPower = null, string? basePower = null,
         string? basePowerBoost = null, string? fueledBasePowerBoost = null,
         string? overclockExp = StandardOverclock,
@@ -61,21 +65,23 @@ public abstract class MachineModule
     }
 
     /// <summary>One mark of a multi-mark family: a machine plus its throughput multiplier.</summary>
-    protected static MarkSpec Mark(int sort, string name, string tier, string throughput,
+    protected static MarkSpec Mark(int sort, string name, Tier tier, string throughput,
         bool isDefault = false, string? power = null, CostEntry[]? cost = null)
         => new(sort,
             Def(name, tier, power, overclockExp: StandardOverclock, cost: cost),
-            new MultiMachineVariant { Name = name, PartsRatio = throughput, Default = isDefault });
+            new MultiMachineVariant { Name = name, PartsRatio = Rational.Parse(throughput), Default = isDefault });
 
     /// <summary>A build-cost entry.</summary>
-    protected static CostEntry C(string part, int amount) => new() { Part = part, Amount = amount.ToString() };
+    protected static CostEntry C(string part, int amount) => new() { Part = part, Amount = amount };
 
     /// <summary>A family capacity mode (resource purity, belt mark, upload rate, …).</summary>
     protected static MultiMachineCapacity Cap(string name, string? partsRatio = null,
         int? color = null, bool isDefault = false, string? powerRatio = null)
-        => new() { Name = name, PartsRatio = partsRatio, Color = color, Default = isDefault, PowerRatio = powerRatio };
+        => new() { Name = name, PartsRatio = Rat(partsRatio), Color = color, Default = isDefault, PowerRatio = Rat(powerRatio) };
 
-    private static MachineDefinition Def(string name, string tier,
+    private static Rational? Rat(string? text) => text is null ? null : Rational.Parse(text);
+
+    private static MachineDefinition Def(string name, Tier tier,
         string? power, string? minPower, string? basePower, string? basePowerBoost,
         string? fueledBasePowerBoost, string? overclockExp, int sloops,
         string? sloopMultiplier, string? sloopPowerExp, CostEntry[]? cost)
@@ -83,19 +89,19 @@ public abstract class MachineModule
         {
             Name = name,
             Tier = tier,
-            AveragePower = power,
-            MinPower = minPower,
-            BasePower = basePower,
-            BasePowerBoost = basePowerBoost,
-            FueledBasePowerBoost = fueledBasePowerBoost,
-            OverclockPowerExponent = overclockExp,
+            AveragePower = Rat(power),
+            MinPower = Rat(minPower),
+            BasePower = Rat(basePower),
+            BasePowerBoost = Rat(basePowerBoost),
+            FueledBasePowerBoost = Rat(fueledBasePowerBoost),
+            OverclockPowerExponent = Rat(overclockExp),
             MaxProductionShards = sloops,
-            ProductionShardMultiplier = sloopMultiplier,
-            ProductionShardPowerExponent = sloopPowerExp,
+            ProductionShardMultiplier = Rat(sloopMultiplier),
+            ProductionShardPowerExponent = Rat(sloopPowerExp),
             Cost = cost?.ToList() ?? [],
         };
 
-    private static MachineDefinition Def(string name, string tier, string? power = null,
+    private static MachineDefinition Def(string name, Tier tier, string? power = null,
         string? overclockExp = null, CostEntry[]? cost = null)
         => Def(name, tier, power, null, null, null, null, overclockExp, 0, null, null, cost);
 }

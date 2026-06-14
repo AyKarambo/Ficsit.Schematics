@@ -1,3 +1,5 @@
+using Ficsit.Schematics.Core.Numerics;
+
 namespace Ficsit.Schematics.Core.GameData.Catalog;
 
 /// <summary>
@@ -19,14 +21,14 @@ public abstract class RecipeModule
         => Recipes.Select(r => (r.Sort, r.ToDefinition(Machine)));
 
     /// <summary>A consumed input, stored as a negative per-batch amount.</summary>
-    protected static RecipePart In(string part, int amount) => new() { Part = part, Amount = (-amount).ToString() };
+    protected static RecipePart In(string part, int amount) => new() { Part = part, Amount = -amount };
 
     /// <summary>A consumed input with a fractional amount (e.g. "5/2").</summary>
-    protected static RecipePart In(string part, string amount) => new() { Part = part, Amount = "-" + amount };
+    protected static RecipePart In(string part, string amount) => new() { Part = part, Amount = -Rational.Parse(amount) };
 
     /// <summary>A produced output, stored as a positive per-batch amount.</summary>
-    protected static RecipePart Out(string part, int amount) => new() { Part = part, Amount = amount.ToString() };
+    protected static RecipePart Out(string part, int amount) => new() { Part = part, Amount = amount };
 
     /// <summary>A produced output with a fractional amount (e.g. "3/2").</summary>
-    protected static RecipePart Out(string part, string amount) => new() { Part = part, Amount = amount };
+    protected static RecipePart Out(string part, string amount) => new() { Part = part, Amount = Rational.Parse(amount) };
 }

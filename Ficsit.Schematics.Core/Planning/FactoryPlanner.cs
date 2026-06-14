@@ -455,7 +455,7 @@ public static class FactoryPlanner
     /// <summary>Average MW one machine of this recipe consumes (0 for generators).</summary>
     public static Rational PowerPerMachine(GameDatabase data, RecipeDefinition recipe)
     {
-        var recipeOverride = GameDatabase.ParseOrZero(recipe.AveragePower);
+        var recipeOverride = recipe.AveragePower ?? Rational.Zero;
         if (!recipeOverride.IsZero) return recipeOverride.Abs();
 
         if (!data.MachinesByName.TryGetValue(recipe.Machine, out var machine))

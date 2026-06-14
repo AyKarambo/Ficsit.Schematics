@@ -4,7 +4,7 @@ namespace Ficsit.Schematics.Core.GameData.Catalog;
 public sealed record Part(
     int Sort,
     string Name,
-    string Tier,
+    Tier Tier,
     int SinkPoints = 0,
     bool Fluid = false,
     bool ManuallyGathered = false)

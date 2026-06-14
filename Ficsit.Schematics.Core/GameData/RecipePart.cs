@@ -5,7 +5,9 @@ namespace Ficsit.Schematics.Core.GameData;
 public sealed class RecipePart
 {
     public string Part { get; set; } = string.Empty;
-    public string Amount { get; set; } = "0";
 
-    public Rational AmountValue => GameDatabase.ParseOrZero(Amount);
+    /// <summary>Per-batch amount: negative = input, positive = output (exact).</summary>
+    public Rational Amount { get; set; } = Rational.Zero;
+
+    public Rational AmountValue => Amount;
 }
