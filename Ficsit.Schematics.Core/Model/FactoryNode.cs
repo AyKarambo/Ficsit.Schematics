@@ -50,6 +50,13 @@ public sealed class FactoryNode
 
     public StorageMode StorageMode { get; set; } = StorageMode.PartiallyFull;
 
+    /// <summary>User-chosen display order of input ports (part names, top to bottom). Empty =
+    /// natural order. Parts absent here keep their natural order, appended after listed ones.</summary>
+    public List<string> InputOrder { get; set; } = [];
+
+    /// <summary>User-chosen display order of output ports. See <see cref="InputOrder"/>.</summary>
+    public List<string> OutputOrder { get; set; } = [];
+
     /// <summary>
     /// Map-mode anchor: the save-file instance path of the resource node this
     /// extractor is snapped to; null when unassigned. (Our extension to .sfmd.)

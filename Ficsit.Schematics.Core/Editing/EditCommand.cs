@@ -9,4 +9,8 @@ public sealed class EditCommand
 
     /// <summary>Commands with the same non-null key merge into one undo step (drag coalescing).</summary>
     public string? CoalesceKey { get; init; }
+
+    /// <summary>Whether applying this command can change solver results. False for pure
+    /// geometry edits (node moves), which skip the re-solve so dragging stays smooth.</summary>
+    public bool AffectsSolve { get; init; } = true;
 }

@@ -95,7 +95,16 @@ internal sealed class NodeProfile
 
             case NodeKind.Outpost:
             case NodeKind.Blueprint:
-                // Outposts are visual grouping; their interior solves as part of the same pass.
+                // Transparent container: excluded from the solve; its connections are rerouted
+                // onto the interior Import/Export boundary nodes (see BasicSolver).
+                break;
+
+            case NodeKind.Import:
+            case NodeKind.Export:
+                // Outpost boundary: passes its part straight through — exterior supply on one
+                // side, interior demand on the other (or vice versa for Export).
+                profile.IsPassThrough = true;
+                profile.IsPpmDisplay = true;
                 break;
         }
 

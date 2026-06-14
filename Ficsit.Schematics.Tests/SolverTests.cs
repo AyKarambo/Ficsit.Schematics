@@ -1,3 +1,4 @@
+using Ficsit.Schematics.Core.Editing;
 using Ficsit.Schematics.Core.Model;
 using Ficsit.Schematics.Core.Numerics;
 using Ficsit.Schematics.Core.Serialization;
@@ -174,6 +175,88 @@ public class SolverTests
         Assert.Equal(new Rational(60), result.For(sink).SinkPointsPerMinute);
     }
 
+    // ------------------------------------------------------------ Outposts
+
+    [Fact]
+    public void Outpost_passes_exterior_supply_through_to_the_interior()
+    {
+        // Exterior miner → outpost (Import: Iron Ore) → interior smelter. The outpost is
+        // transparent: 60 ore must cross the boundary and run 2 interior smelters.
+        var doc = new FactoryDocument();
+        var miner = Node(doc, "Iron Ore", "60");
+        var outpost = Node(doc, "Outpost");
+        outpost.Children = new FactoryGraph();
+        var import = new FactoryNode { Name = "Iron Ore", Kind = NodeKind.Import };
+        var smelter = new FactoryNode { Name = "Iron Ingot", Kind = NodeKind.Recipe, Max = "2" };
+        outpost.Children.Nodes.Add(import);
+        outpost.Children.Nodes.Add(smelter);
+        outpost.Children.Connections.Add(new NodeConnection { From = import, To = smelter, Part = "Iron Ore" });
+        Connect(doc, miner, "Iron Ore", outpost);
+
+        var result = Solve(doc);
+        Assert.Equal(new Rational(2), result.For(smelter).Count);
+        Assert.Equal(new Rational(60), result.Flows[doc.Root.Connections.Single()]); // exterior wire carries 60
+    }
+
+    [Fact]
+    public void Outpost_passes_interior_output_through_to_the_exterior()
+    {
+        // Interior miner → outpost (Export: Iron Ore) → exterior smelter.
+        var doc = new FactoryDocument();
+        var outpost = Node(doc, "Outpost");
+        outpost.Children = new FactoryGraph();
+        var miner = new FactoryNode { Name = "Iron Ore", Kind = NodeKind.Recipe, Max = "60" };
+        var export = new FactoryNode { Name = "Iron Ore", Kind = NodeKind.Export };
+        outpost.Children.Nodes.Add(miner);
+        outpost.Children.Nodes.Add(export);
+        outpost.Children.Connections.Add(new NodeConnection { From = miner, To = export, Part = "Iron Ore" });
+        var smelter = Node(doc, "Iron Ingot", "2"); // exterior consumer wants 60 ore
+        Connect(doc, outpost, "Iron Ore", smelter);
+
+        var result = Solve(doc);
+        Assert.Equal(new Rational(2), result.For(smelter).Count);
+        Assert.Equal(new Rational(60), result.Flows[doc.Root.Connections.Single()]);
+    }
+
+    [Fact]
+    public void Connecting_to_an_outpost_creates_a_boundary_then_passes_through()
+    {
+        // End-to-end through the editor: wiring from outside auto-creates the Import boundary;
+        // wiring it to an interior smelter then carries the 60 ore across the boundary.
+        var doc = new FactoryDocument();
+        var miner = Node(doc, "Iron Ore", "60");
+        var outpost = Node(doc, "Outpost");
+        outpost.Children = new FactoryGraph();
+        var smelter = new FactoryNode { Name = "Iron Ingot", Kind = NodeKind.Recipe, Max = "2" };
+        outpost.Children.Nodes.Add(smelter);
+
+        var editor = new FactoryEditor(TestData.Database);
+        editor.LoadDocument(doc);
+
+        Assert.True(editor.Connect(miner, "Iron Ore", outpost));
+        var import = outpost.Children.Nodes.Single(n => n.Kind == NodeKind.Import && n.Name == "Iron Ore");
+
+        editor.EnterOutpost(outpost);
+        Assert.True(editor.Connect(import, "Iron Ore", smelter));
+
+        Assert.Equal(new Rational(2), editor.Result.For(smelter).Count);
+    }
+
+    [Fact]
+    public void Connecting_to_an_outpost_without_a_boundary_does_not_throw()
+    {
+        // Regression: outpost connections once indexed a missing solver state and threw.
+        // With no boundary node the connection simply carries nothing (dropped from the solve).
+        var doc = new FactoryDocument();
+        var miner = Node(doc, "Iron Ore", "60");
+        var outpost = Node(doc, "Outpost");
+        outpost.Children = new FactoryGraph();
+        Connect(doc, miner, "Iron Ore", outpost);
+
+        var result = Solve(doc);
+        Assert.Equal(Rational.Zero, result.FlowOf(doc.Root.Connections.Single()));
+    }
+
     [Fact]
     public void Power_is_negative_for_consumers()
     {
@@ -288,6 +371,58 @@ public class SolverTests
         Assert.Equal(new Rational(5), node.Count);              // ceil(W / (W/5)) == 5: stable
         Assert.Equal(new Rational(11, 10), node.EffectiveClock); // exactly the stored clock
         Assert.Equal(new Rational(165), node.Inputs["Iron Ore"].Target);
+    }
+
+    [Fact]
+    public void Stepping_a_limited_auto_round_node_moves_count_not_throughput()
+    {
+        // Bug #15: a count-display Max pins the count independent of clock, so the old
+        // stepper (clock only) changed the output instead of the machine count. The fix
+        // moves the limit with the clock so the count steps and throughput is preserved.
+        var doc = new FactoryDocument();
+        var miner = Node(doc, "Iron Ore", "300");   // ample ore, so the smelter's Max binds
+        var smelter = Node(doc, "Iron Ingot", "6");  // count limit = 6 machines
+        smelter.AutoRound = true;
+        Connect(doc, miner, "Iron Ore", smelter);
+
+        var editor = new FactoryEditor(TestData.Database);
+        editor.LoadDocument(doc);
+
+        var before = editor.Result.For(smelter);
+        Assert.Equal(new Rational(6), before.Count);
+        var outputBefore = before.Outputs["Iron Ingot"].Target;
+        var oreBefore = before.Inputs["Iron Ore"].Target;
+
+        editor.StepAutoRound(smelter, +1); // one more machine
+
+        var after = editor.Result.For(smelter);
+        Assert.Equal(new Rational(7), after.Count);                      // count moved 6 → 7
+        Assert.Equal(outputBefore, after.Outputs["Iron Ingot"].Target); // throughput unchanged
+        Assert.Equal(oreBefore, after.Inputs["Iron Ore"].Target);
+    }
+
+    [Fact]
+    public void Moving_a_node_refreshes_without_resolving_but_edits_resolve()
+    {
+        var doc = new FactoryDocument();
+        var miner = Node(doc, "Iron Ore", "60");
+        var smelter = Node(doc, "Iron Ingot");
+        Connect(doc, miner, "Iron Ore", smelter);
+
+        var editor = new FactoryEditor(TestData.Database);
+        editor.LoadDocument(doc);
+
+        var solves = 0;
+        var geometryChanges = 0;
+        editor.Solved += () => solves++;
+        editor.GeometryChanged += () => geometryChanges++;
+
+        editor.MoveNodes([smelter], 50, 50, coalesce: false);
+        Assert.Equal(0, solves);          // a pure position change must not re-solve
+        Assert.Equal(1, geometryChanges); // but the view is told to refresh
+
+        editor.SetClockSpeed(smelter, new Rational(3, 2));
+        Assert.Equal(1, solves);          // a real edit still re-solves
     }
 
     [Fact]

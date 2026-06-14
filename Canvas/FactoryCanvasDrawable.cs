@@ -25,14 +25,28 @@ public sealed class FactoryCanvasDrawable(AppState state, IconStore icons, Numbe
     public RectF? RubberBand { get; set; }
     public (PointF Screen, string Text)? Tooltip { get; set; }
 
+    /// <summary>While a connection wire hovers an outpost/blueprint: its on-screen rect and
+    /// whether the pointer is over the left (input) half — drawn as two drop zones.</summary>
+    public (RectF Screen, bool LeftActive)? OutpostDropHint { get; set; }
+
     /// <summary>The resource marker a dragged extractor would snap to; drawn highlighted.</summary>
     public ResourceNodeInfo? SnapPreviewMarker { get; set; }
+
+    /// <summary>While reordering a port, the world-space insertion slot (x, y, width) drawn as
+    /// a short bar between ports.</summary>
+    public (float X, float Y, float Width)? PortInsertLine { get; set; }
 
     /// <summary>True when the world map underlay and resource markers are active (root scope).</summary>
     public bool MapActive => state.Settings.ShowMap && state.Editor.ScopePath.Count == 0;
 
     private readonly Dictionary<FactoryNode, NodeLayout> _layouts = [];
     private bool _layoutsDirty = true;
+
+    // Text measurement is the dominant per-frame cost when panning (one GetStringSize per
+    // port/connection label per frame). The size of a given (text, fontSize) pair never
+    // changes — the font is constant — so memoize it; pan holds zoom (hence fontSize) fixed,
+    // so every label hits the cache after the first frame. Bounded by a hard cap.
+    private readonly Dictionary<(string Text, float FontSize), SizeF> _textSizeCache = [];
 
     public void InvalidateLayouts() => _layoutsDirty = true;
 
@@ -84,6 +98,13 @@ public sealed class FactoryCanvasDrawable(AppState state, IconStore icons, Numbe
         foreach (var node in scope.Nodes)
             if (layouts.TryGetValue(node, out var layout))
                 DrawNode(canvas, layout, result);
+
+        if (PortInsertLine is { } ins)
+        {
+            canvas.StrokeColor = Theme.SelectedBorder;
+            canvas.StrokeSize = 2.5f;
+            canvas.DrawLine(ins.X, ins.Y, ins.X + ins.Width, ins.Y);
+        }
 
         canvas.RestoreState();
 
@@ -305,6 +326,31 @@ public sealed class FactoryCanvasDrawable(AppState state, IconStore icons, Numbe
             canvas.DrawRoundedRectangle(layout.Bounds, corner);
             var icon = icons.GetImage(node.Kind == NodeKind.Outpost ? "Outpost" : "Blueprint");
             if (icon is not null) canvas.DrawImage(icon, layout.ImageRect.X, layout.ImageRect.Y, layout.ImageRect.Width, layout.ImageRect.Height);
+            // Part icons on the boundary ports, same as machine cards, so it's clear what
+            // flows in (left) and out (right).
+            foreach (var port in layout.Inputs)
+                DrawPort(canvas, layout, port, nodeResult);
+            foreach (var port in layout.Outputs)
+                DrawPort(canvas, layout, port, nodeResult);
+            DrawTitle(canvas, layout, node);
+            return;
+        }
+
+        // Outpost boundary badge: the part icon plus its single boundary port.
+        if (node.Kind is NodeKind.Import or NodeKind.Export)
+        {
+            canvas.FillColor = Theme.CardBackground;
+            canvas.FillRoundedRectangle(layout.Bounds, corner);
+            canvas.StrokeColor = selected ? Theme.SelectedBorder : Theme.CardBorder;
+            canvas.StrokeSize = selected ? 2f : 1f;
+            canvas.DrawRoundedRectangle(layout.Bounds, corner);
+            var partIcon = icons.GetImage(node.Name);
+            if (partIcon is not null)
+                canvas.DrawImage(partIcon, layout.ImageRect.X, layout.ImageRect.Y, layout.ImageRect.Width, layout.ImageRect.Height);
+            foreach (var port in layout.Inputs)
+                DrawPort(canvas, layout, port, nodeResult);
+            foreach (var port in layout.Outputs)
+                DrawPort(canvas, layout, port, nodeResult);
             DrawTitle(canvas, layout, node);
             return;
         }
@@ -568,6 +614,17 @@ public sealed class FactoryCanvasDrawable(AppState state, IconStore icons, Numbe
     /// <paramref name="anchorRight"/> is true, i.e. input-side labels) or with its
     /// left edge at <paramref name="x"/> (output-side and connection labels).
     /// </summary>
+    /// <summary>Memoized <see cref="ICanvas.GetStringSize"/> (font is always bold). The
+    /// measurement for a (text, size) pair is invariant, so this is safe to cache forever;
+    /// a hard cap guards against unbounded growth across many zoom levels.</summary>
+    private SizeF MeasureText(ICanvas canvas, string text, Microsoft.Maui.Graphics.Font font, float fontSize)
+    {
+        var key = (text, fontSize);
+        if (_textSizeCache.TryGetValue(key, out var size)) return size;
+        if (_textSizeCache.Count > 4096) _textSizeCache.Clear();
+        return _textSizeCache[key] = canvas.GetStringSize(text, font, fontSize);
+    }
+
     private void DrawLabelPill(ICanvas canvas, string text, float x, float centerY, bool anchorRight)
     {
         // Clamp the font upward so effective on-screen size never drops below the
@@ -575,7 +632,7 @@ public sealed class FactoryCanvasDrawable(AppState state, IconStore icons, Numbe
         var fontSize = MathF.Max(NodeLayout.LabelFontSize, NodeLayout.LabelMinEffectivePx / Zoom);
         var font = Microsoft.Maui.Graphics.Font.DefaultBold;
 
-        var textSize = canvas.GetStringSize(text, font, fontSize);
+        var textSize = MeasureText(canvas, text, font, fontSize);
         var pillW = textSize.Width + NodeLayout.LabelPillPadX * 2;
         var pillH = textSize.Height + NodeLayout.LabelPillPadY * 2;
         var pillX = anchorRight ? x - pillW : x;
@@ -595,6 +652,27 @@ public sealed class FactoryCanvasDrawable(AppState state, IconStore icons, Numbe
 
     private void DrawAdorners(ICanvas canvas)
     {
+        if (OutpostDropHint is { } hint)
+        {
+            var r = hint.Screen;
+            var mid = r.X + r.Width / 2;
+            var left = new RectF(r.X, r.Y, r.Width / 2, r.Height);
+            var right = new RectF(mid, r.Y, r.Width / 2, r.Height);
+            // Both halves tinted; the side the pointer is over is emphasized.
+            canvas.FillColor = Theme.SelectedBorder.WithAlpha(hint.LeftActive ? 0.40f : 0.12f);
+            canvas.FillRectangle(left);
+            canvas.FillColor = Theme.SelectedBorder.WithAlpha(hint.LeftActive ? 0.12f : 0.40f);
+            canvas.FillRectangle(right);
+            canvas.StrokeColor = Theme.SelectedBorder;
+            canvas.StrokeSize = 1f;
+            canvas.DrawRectangle(r);
+            canvas.DrawLine(mid, r.Y, mid, r.Bottom);
+            canvas.FontColor = Theme.SelectedBorder;
+            canvas.FontSize = 9f;
+            canvas.DrawString("in", left, HorizontalAlignment.Center, VerticalAlignment.Bottom);
+            canvas.DrawString("out", right, HorizontalAlignment.Center, VerticalAlignment.Bottom);
+        }
+
         if (PendingWire is { } wire)
         {
             canvas.StrokeColor = Theme.SelectedBorder;

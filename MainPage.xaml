@@ -638,5 +638,12 @@
                HorizontalOptions="Start" VerticalOptions="Start" FontSize="11" HeightRequest="26"
                HorizontalTextAlignment="Center"
                Completed="OnLimitEditorCompleted" Unfocused="OnLimitEditorUnfocused" />
+
+        <!-- right-click-a-port context menu, floats at the cursor -->
+        <Border x:Name="PortMenu" Style="{StaticResource Panel}" IsVisible="False"
+                HorizontalOptions="Start" VerticalOptions="Start" Padding="4">
+            <Button x:Name="PortMenuClear" Text="Clear connections" FontSize="12"
+                    HeightRequest="30" Padding="12,0" Clicked="OnPortMenuClear" />
+        </Border>
     </Grid>
 </ContentPage>

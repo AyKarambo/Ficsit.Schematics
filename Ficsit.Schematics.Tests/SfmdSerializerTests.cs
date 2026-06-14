@@ -79,6 +79,48 @@ public class SfmdSerializerTests
     }
 
     [Fact]
+    public void Port_order_overrides_roundtrip()
+    {
+        var doc = new FactoryDocument();
+        var node = new FactoryNode
+        {
+            Name = "Heavy Flexible Frame",
+            InputOrder = ["Rubber", "Modular Frame", "Screw"],
+            OutputOrder = ["Heavy Modular Frame"],
+        };
+        doc.Root.Nodes.Add(node);
+
+        var reloaded = SfmdSerializer.Deserialize(SfmdSerializer.Serialize(doc));
+        var n = Assert.Single(reloaded.Root.Nodes);
+        Assert.Equal(new[] { "Rubber", "Modular Frame", "Screw" }, n.InputOrder);
+        Assert.Equal(new[] { "Heavy Modular Frame" }, n.OutputOrder);
+    }
+
+    [Fact]
+    public void Empty_port_order_is_omitted_from_json()
+    {
+        var doc = new FactoryDocument();
+        doc.Root.Nodes.Add(new FactoryNode { Name = "Iron Ingot" });
+        var entry = JsonNode.Parse(SfmdSerializer.Serialize(doc))!.AsObject()["Data"]!.AsArray()[0]!.AsObject();
+        Assert.False(entry.ContainsKey("InputOrder"));
+        Assert.False(entry.ContainsKey("OutputOrder"));
+    }
+
+    [Fact]
+    public void Outpost_boundary_node_kinds_roundtrip()
+    {
+        var doc = new FactoryDocument();
+        var outpost = new FactoryNode { Name = "Outpost", Kind = NodeKind.Outpost, Children = new FactoryGraph() };
+        outpost.Children!.Nodes.Add(new FactoryNode { Name = "Iron Ore", Kind = NodeKind.Import });
+        outpost.Children!.Nodes.Add(new FactoryNode { Name = "Iron Ingot", Kind = NodeKind.Export });
+        doc.Root.Nodes.Add(outpost);
+
+        var inner = SfmdSerializer.Deserialize(SfmdSerializer.Serialize(doc)).Root.Nodes.Single().Children!.Nodes;
+        Assert.Equal(NodeKind.Import, inner.Single(n => n.Name == "Iron Ore").Kind);
+        Assert.Equal(NodeKind.Export, inner.Single(n => n.Name == "Iron Ingot").Kind);
+    }
+
+    [Fact]
     public void Nested_outpost_children_roundtrip()
     {
         var doc = new FactoryDocument();

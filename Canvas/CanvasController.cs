@@ -24,6 +24,10 @@ public sealed class CanvasController(AppState state, FactoryCanvasDrawable drawa
     private PortInfo? _pressPort;
     private NodeConnection? _detachedConnection;
 
+    // Port reorder: active while a port drag stays within its own side's column.
+    private bool _reorderActive;
+    private int _reorderIndex;
+
     // Phase 3 "drag out of a resource node": the free marker pressed on empty canvas,
     // and the extractor created from it once the drag starts.
     private ResourceNodeInfo? _pressMarker;
@@ -35,6 +39,7 @@ public sealed class CanvasController(AppState state, FactoryCanvasDrawable drawa
     public event Action<PointF>? OpenRecipeChooser;        // screen position
     public event Action<PortDragContext, PointF>? OpenChooserForPort;
     public event Action<FactoryNode, PointF>? OpenMachinePopup;
+    public event Action<FactoryNode, PortInfo, PointF>? OpenPortMenu;
     public event Action<FactoryNode>? EnterOutpostRequested;
     public event Action<FactoryNode, NodeLayout>? EditLimitRequested;
     public event Action? Invalidate;
@@ -43,6 +48,10 @@ public sealed class CanvasController(AppState state, FactoryCanvasDrawable drawa
     public event Action? CloseTransientOverlays;
 
     private float DragThreshold => Math.Max(2, state.Settings.DragSensitivity / 4f);
+
+    /// <summary>True while a pan/drag/connect/rubber-band gesture is in flight. Lets the host
+    /// skip the per-move status recompute (full node walk) until the gesture ends.</summary>
+    public bool IsInteracting => _mode is Mode.Pan or Mode.DragNodes or Mode.Connect or Mode.RubberBand;
 
     // ---------------------------------------------------------------- pressed
 
@@ -57,6 +66,7 @@ public sealed class CanvasController(AppState state, FactoryCanvasDrawable drawa
         _detachedConnection = null;
         _pressMarker = null;
         _dragOutNode = null;
+        _reorderActive = false;
         _mode = Mode.Pressed;
 
         // Drag-out-of-a-resource-node: an empty press over a free marker arms the
@@ -123,11 +133,26 @@ public sealed class CanvasController(AppState state, FactoryCanvasDrawable drawa
                 break;
 
             case Mode.Connect:
-                var anchorLayout = _pressNode is not null ? GetLayout(_pressNode) : null;
-                var anchor = anchorLayout is not null && _pressPort is not null
-                    ? drawable.WorldToScreen(anchorLayout.PortAnchor(_pressPort))
-                    : _pressScreen;
-                drawable.PendingWire = (anchor, screen);
+                // Staying within the pressed port's own side reorders it; otherwise it's a
+                // connection drag (pending wire + outpost drop zones).
+                if (_dragOutNode is null && TryReorderHint(world, out var insertLine))
+                {
+                    _reorderActive = true;
+                    drawable.PortInsertLine = insertLine;
+                    drawable.PendingWire = null;
+                    drawable.OutpostDropHint = null;
+                }
+                else
+                {
+                    _reorderActive = false;
+                    drawable.PortInsertLine = null;
+                    var anchorLayout = _pressNode is not null ? GetLayout(_pressNode) : null;
+                    var anchor = anchorLayout is not null && _pressPort is not null
+                        ? drawable.WorldToScreen(anchorLayout.PortAnchor(_pressPort))
+                        : _pressScreen;
+                    drawable.PendingWire = (anchor, screen);
+                    UpdateOutpostDropHint(world);
+                }
                 Invalidate?.Invoke();
                 break;
 
@@ -166,10 +191,15 @@ public sealed class CanvasController(AppState state, FactoryCanvasDrawable drawa
 
             case Mode.Connect:
                 drawable.PendingWire = null;
-                if (_dragOutNode is not null)
+                drawable.OutpostDropHint = null;
+                drawable.PortInsertLine = null;
+                if (_reorderActive)
+                    CommitReorder();
+                else if (_dragOutNode is not null)
                     CompleteDragOut(world, screen);
                 else
                     CompleteConnection(world, screen);
+                _reorderActive = false;
                 break;
 
             case Mode.RubberBand:
@@ -205,6 +235,14 @@ public sealed class CanvasController(AppState state, FactoryCanvasDrawable drawa
 
         if (isRight)
         {
+            // A right-click on a connected port offers "clear connection(s)"; an unconnected
+            // port (or the node body) falls through to the machine editor.
+            var rightPort = layout?.HitPort(world);
+            if (node is not null && rightPort is not null && PortHasConnections(node, rightPort))
+            {
+                OpenPortMenu?.Invoke(node, rightPort, screen);
+                return;
+            }
             if (node is not null)
             {
                 if (!state.Selection.Contains(node))
@@ -269,6 +307,9 @@ public sealed class CanvasController(AppState state, FactoryCanvasDrawable drawa
 
         var (targetNode, targetLayout) = HitNode(world);
         var targetPort = targetLayout?.HitPort(world);
+        if (targetNode is not null && targetLayout is not null
+            && targetNode.Kind is NodeKind.Outpost or NodeKind.Blueprint)
+            targetPort = OutpostDropPort(targetLayout, world);
 
         if (_detachedConnection is not null)
         {
@@ -285,6 +326,20 @@ public sealed class CanvasController(AppState state, FactoryCanvasDrawable drawa
 
         if (targetNode is null)
         {
+            // Inside an outpost, dropping a machine port on empty canvas declares a boundary:
+            // an input port wants supply from outside (Import), an output needs to leave (Export).
+            if (state.Editor.ScopePath.Count > 0 && _pressPort.Part != "AnyPart")
+            {
+                var isImport = _pressPort.IsInput;
+                state.Editor.Commands.BeginGroup(isImport ? "Add import" : "Add export");
+                var boundary = state.Editor.AddBoundaryNode(_pressPort.Part, isImport,
+                    world.X - NodeLayout.SpecialtySize / 2, world.Y - NodeLayout.SpecialtySize / 2);
+                if (isImport) state.Editor.Connect(boundary, _pressPort.Part, _pressNode);
+                else state.Editor.Connect(_pressNode, _pressPort.Part, boundary);
+                state.Editor.Commands.EndGroup();
+                drawable.InvalidateLayouts();
+                return;
+            }
             // Dropped on empty canvas: offer compatible recipes for this port.
             OpenChooserForPort?.Invoke(
                 new PortDragContext(_pressNode, _pressPort.Part, !_pressPort.IsInput), screen);
@@ -310,7 +365,13 @@ public sealed class CanvasController(AppState state, FactoryCanvasDrawable drawa
         from = null; part = null; to = null;
         if (targetNode is null) return false;
 
-        var pressIsOutput = !pressPort.IsInput;
+        // Dropping on an outpost/blueprint: the side hit decides its role — left/input side
+        // makes the outpost the consumer (the pressed end is the producer), right/output side
+        // makes it the producer. Otherwise the pressed port's own side decides direction.
+        var targetIsOutpost = targetNode.Kind is NodeKind.Outpost or NodeKind.Blueprint;
+        var pressIsOutput = targetIsOutpost && targetPort is not null
+            ? targetPort.IsInput
+            : !pressPort.IsInput;
         var pressPart = pressPort.Part;
 
         if (pressIsOutput)
@@ -344,6 +405,108 @@ public sealed class CanvasController(AppState state, FactoryCanvasDrawable drawa
                 return false;
         }
         return from != to;
+    }
+
+    /// <summary>While dragging from a port, true when the pointer is over the pressed node's
+    /// own port column on the same side (≥2 ports), meaning the gesture is a reorder rather
+    /// than a connect. Outputs the world-space insertion bar and records the target index.</summary>
+    private bool TryReorderHint(PointF world, out (float X, float Y, float Width) line)
+    {
+        line = default;
+        if (_pressNode is null || _pressPort is null) return false;
+        var layout = GetLayout(_pressNode);
+        if (layout is null || !layout.Bounds.Contains(world)) return false;
+
+        var ports = _pressPort.IsInput ? layout.Inputs : layout.Outputs;
+        if (ports.Count < 2) return false;
+        var sameSide = _pressPort.IsInput
+            ? world.X < layout.Bounds.Center.X
+            : world.X >= layout.Bounds.Center.X;
+        if (!sameSide) return false;
+
+        var index = 0;
+        foreach (var port in ports)
+            if (port.IconRect.Center.Y < world.Y) index++;
+        _reorderIndex = index;
+
+        var slotY = index < ports.Count
+            ? ports[index].IconRect.Top - 1f
+            : ports[^1].IconRect.Bottom + 1f;
+        line = (ports[0].IconRect.Left - 2f, slotY, NodeLayout.PortSize + 4f);
+        return true;
+    }
+
+    /// <summary>Commit the reorder captured by <see cref="TryReorderHint"/>: move the pressed
+    /// port's part to the target slot and persist the whole side's new order (undoable).</summary>
+    private void CommitReorder()
+    {
+        if (_pressNode is null || _pressPort is null) return;
+        var layout = GetLayout(_pressNode);
+        if (layout is null) return;
+        var ports = _pressPort.IsInput ? layout.Inputs : layout.Outputs;
+        var order = ports.Select(p => p.Part).ToList();
+        var fromIndex = order.IndexOf(_pressPort.Part);
+        if (fromIndex < 0) return;
+
+        var target = Math.Clamp(_reorderIndex, 0, order.Count);
+        order.RemoveAt(fromIndex);
+        if (target > fromIndex) target--;
+        order.Insert(Math.Clamp(target, 0, order.Count), _pressPort.Part);
+        if (order.SequenceEqual(ports.Select(p => p.Part))) return; // no change
+
+        state.Editor.SetPortOrder(_pressNode, _pressPort.IsInput, order);
+        drawable.InvalidateLayouts();
+    }
+
+    private bool PortHasConnections(FactoryNode node, PortInfo port)
+    {
+        var scope = state.Editor.CurrentScope;
+        return port.IsInput
+            ? scope.IncomingTo(node, port.Part).Any()
+            : scope.OutgoingFrom(node, port.Part).Any();
+    }
+
+    /// <summary>Right-click → "Clear connection(s)": remove every connection on this exact
+    /// port (same node, part and side) as one undo step.</summary>
+    public void ClearPortConnections(FactoryNode node, PortInfo port)
+    {
+        var scope = state.Editor.CurrentScope;
+        var doomed = (port.IsInput
+            ? scope.IncomingTo(node, port.Part)
+            : scope.OutgoingFrom(node, port.Part)).ToList();
+        if (doomed.Count == 0) return;
+        state.Editor.Commands.BeginGroup("Clear connections");
+        foreach (var connection in doomed)
+            state.Editor.Disconnect(connection);
+        state.Editor.Commands.EndGroup();
+        drawable.InvalidateLayouts();
+        Invalidate?.Invoke();
+    }
+
+    /// <summary>For an outpost/blueprint drop target the side under the pointer picks the
+    /// role: left half = input stub (it consumes), right half = output stub (it provides).</summary>
+    private static PortInfo? OutpostDropPort(NodeLayout layout, PointF world)
+        => world.X < layout.Bounds.Center.X
+            ? layout.Inputs.FirstOrDefault() ?? layout.Outputs.FirstOrDefault()
+            : layout.Outputs.FirstOrDefault() ?? layout.Inputs.FirstOrDefault();
+
+    /// <summary>While dragging a wire, show the left/right input/output drop zones when it
+    /// hovers an outpost or blueprint (other than the one the drag started from).</summary>
+    private void UpdateOutpostDropHint(PointF world)
+    {
+        var (node, layout) = HitNode(world);
+        if (node is not null && layout is not null && node != _pressNode
+            && node.Kind is NodeKind.Outpost or NodeKind.Blueprint)
+        {
+            var tl = drawable.WorldToScreen(new PointF(layout.Bounds.Left, layout.Bounds.Top));
+            var br = drawable.WorldToScreen(new PointF(layout.Bounds.Right, layout.Bounds.Bottom));
+            drawable.OutpostDropHint =
+                (new RectF(tl.X, tl.Y, br.X - tl.X, br.Y - tl.Y), world.X < layout.Bounds.Center.X);
+        }
+        else
+        {
+            drawable.OutpostDropHint = null;
+        }
     }
 
     // ------------------------------------------------------------------- misc
@@ -572,6 +735,9 @@ public sealed class CanvasController(AppState state, FactoryCanvasDrawable drawa
 
         var (targetNode, targetLayout) = HitNode(world);
         var targetPort = targetLayout?.HitPort(world);
+        if (targetNode is not null && targetLayout is not null
+            && targetNode.Kind is NodeKind.Outpost or NodeKind.Blueprint)
+            targetPort = OutpostDropPort(targetLayout, world);
 
         if (targetNode is not null && targetNode != node
             && TryResolveEndpoints(node, port, targetNode, targetPort, out var from, out var part, out var to))
@@ -605,7 +771,10 @@ public sealed class CanvasController(AppState state, FactoryCanvasDrawable drawa
         }
         _mode = Mode.Idle;
         _pressMarker = null;
+        _reorderActive = false;
         drawable.PendingWire = null;
+        drawable.OutpostDropHint = null;
+        drawable.PortInsertLine = null;
         drawable.SnapPreviewMarker = null;
         drawable.RubberBand = null;
         Invalidate?.Invoke();

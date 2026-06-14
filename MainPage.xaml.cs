@@ -62,16 +62,21 @@ public partial class MainPage : ContentPage
         _controller.Invalidate += () =>
         {
             Canvas.Invalidate();
-            UpdateStatus();
+            // Panning/dragging can't change the solve, so skip the per-move status walk
+            // (every node + power lookup); it runs once when the gesture ends and after any
+            // real edit via OnSolved.
+            if (!_controller.IsInteracting) UpdateStatus();
         };
         _controller.OpenRecipeChooser += screen => ShowChooserAt(screen);
         _controller.OpenChooserForPort += ShowChooserForPort;
         _controller.OpenMachinePopup += ShowMachinePopup;
+        _controller.OpenPortMenu += ShowPortMenu;
         _controller.EnterOutpostRequested += node => _state.Editor.EnterOutpost(node);
         _controller.EditLimitRequested += ShowLimitEditor;
         _controller.CloseTransientOverlays += CloseTransientOverlays;
 
         _state.Editor.Solved += OnSolved;
+        _state.Editor.GeometryChanged += OnGeometryChanged;
         _state.Editor.DocumentReplaced += OnDocumentReplaced;
         _state.SelectionChanged += () =>
         {
@@ -244,6 +249,15 @@ public partial class MainPage : ContentPage
 
     // ------------------------------------------------------- editor events
 
+    /// <summary>A node was moved: refresh the view without re-solving (positions don't change
+    /// flows, machine counts, power, or summaries).</summary>
+    private void OnGeometryChanged()
+    {
+        _drawable.InvalidateLayouts();
+        Canvas.Invalidate();
+        UpdateUndoRedo();
+    }
+
     private void OnSolved()
     {
         _drawable.InvalidateLayouts();
@@ -403,6 +417,7 @@ public partial class MainPage : ContentPage
         AutoPlanPanel.IsVisible = false;
         PartPickerPanel.IsVisible = false;
         RecipeListPanel.IsVisible = false;
+        PortMenu.IsVisible = false;
         CommitLimitEditor();
         _popupNode = null;
         _pendingPortConnect = null;
@@ -421,6 +436,7 @@ public partial class MainPage : ContentPage
         AutoPlanPanel.IsVisible = false;
         PartPickerPanel.IsVisible = false;
         RecipeListPanel.IsVisible = false;
+        PortMenu.IsVisible = false;
         CommitLimitEditor();
         _pendingPortConnect = null;
     }

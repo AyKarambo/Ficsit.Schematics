@@ -99,12 +99,31 @@ public sealed class NodeLayout
             return specialty;
         }
 
+        // Outpost boundary node: a small badge carrying one part — Import provides it to the
+        // interior (output on the right edge), Export consumes it (input on the left edge).
+        if (node.Kind is NodeKind.Import or NodeKind.Export)
+        {
+            var box = new RectF(x, y, SpecialtySize, SpecialtySize);
+            var boundary = new NodeLayout
+            {
+                Node = node,
+                Bounds = box,
+                ImageRect = box.Inflate(-4, -4),
+                HasValueRow = false,
+                HasLimitRow = false,
+            };
+            var isImport = node.Kind == NodeKind.Import;
+            PlacePorts(isImport ? boundary.Outputs : boundary.Inputs, [node.Name],
+                isImport ? box.Right - PortSize : box.Left, box.Top, box.Height, isInput: !isImport);
+            return boundary;
+        }
+
         List<string> inputParts = [];
         List<string> outputParts = [];
         if (node.Kind == NodeKind.Recipe && data.RecipesByName.TryGetValue(node.Name, out var recipe))
         {
-            inputParts = recipe.Inputs.Select(p => p.Part).ToList();
-            outputParts = recipe.Outputs.Select(p => p.Part).ToList();
+            inputParts = OrderParts(recipe.Inputs.Select(p => p.Part).ToList(), node.InputOrder);
+            outputParts = OrderParts(recipe.Outputs.Select(p => p.Part).ToList(), node.OutputOrder);
         }
 
         var portsPerSide = Math.Max(inputParts.Count, outputParts.Count);
@@ -168,6 +187,21 @@ public sealed class NodeLayout
         return layout;
     }
 
+    /// <summary>Apply a user port-order override: listed parts first (in override order),
+    /// then any remaining parts in their natural order. Unknown override entries are ignored.</summary>
+    public static List<string> OrderParts(List<string> parts, List<string> order)
+    {
+        if (order.Count == 0 || parts.Count < 2) return parts;
+        var result = new List<string>(parts.Count);
+        foreach (var part in order)
+            if (parts.Contains(part) && !result.Contains(part))
+                result.Add(part);
+        foreach (var part in parts)
+            if (!result.Contains(part))
+                result.Add(part);
+        return result;
+    }
+
     private static void PlacePorts(List<PortInfo> target, List<string> parts, float x, float y, float areaHeight, bool isInput)
     {
         if (parts.Count == 0) return;
@@ -189,6 +223,15 @@ public sealed class NodeLayout
         var inParts = scope.IncomingTo(node).Select(c => c.Part).Distinct().ToList();
         var outParts = scope.OutgoingFrom(node).Select(c => c.Part).Distinct().ToList();
 
+        // An outpost/blueprint's exterior ports also come from its interior boundary nodes
+        // (declared imports/exports), so a port shows even before it's wired from outside.
+        if (node.Kind is NodeKind.Outpost or NodeKind.Blueprint && node.Children is not null)
+            foreach (var child in node.Children.Nodes)
+            {
+                if (child.Kind == NodeKind.Import && !inParts.Contains(child.Name)) inParts.Add(child.Name);
+                else if (child.Kind == NodeKind.Export && !outParts.Contains(child.Name)) outParts.Add(child.Name);
+            }
+
         var acceptsInputs = node.Kind is not NodeKind.Outpost and not NodeKind.Blueprint
             ? node.StorageMode != StorageMode.Full || node.Kind != NodeKind.StorageContainer
             : true;
@@ -203,8 +246,8 @@ public sealed class NodeLayout
         if (providesOutputs && outParts.Count == 0)
             outParts.Add(inParts.FirstOrDefault(p => p != "AnyPart") ?? "AnyPart");
 
-        PlacePorts(layout.Inputs, inParts, area.Left, area.Top, area.Height, isInput: true);
-        PlacePorts(layout.Outputs, outParts, area.Right - PortSize, area.Top, area.Height, isInput: false);
+        PlacePorts(layout.Inputs, OrderParts(inParts, node.InputOrder), area.Left, area.Top, area.Height, isInput: true);
+        PlacePorts(layout.Outputs, OrderParts(outParts, node.OutputOrder), area.Right - PortSize, area.Top, area.Height, isInput: false);
     }
 
     public PortInfo? HitPort(PointF world)

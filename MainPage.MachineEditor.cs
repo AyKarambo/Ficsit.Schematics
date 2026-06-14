@@ -220,6 +220,31 @@ public partial class MainPage
         _popupNode = null;
     }
 
+    // -------------------------------------------------- port context menu
+
+    private FactoryNode? _portMenuNode;
+    private PortInfo? _portMenuPort;
+
+    /// <summary>Right-click on a connected port: float a one-item "clear connections" menu.</summary>
+    private void ShowPortMenu(FactoryNode node, PortInfo port, PointF screen)
+    {
+        _portMenuNode = node;
+        _portMenuPort = port;
+        var pos = ClampToPage(screen, 170, 40);
+        PortMenu.TranslationX = pos.X;
+        PortMenu.TranslationY = pos.Y;
+        PortMenu.IsVisible = true;
+    }
+
+    private void OnPortMenuClear(object? sender, EventArgs e)
+    {
+        PortMenu.IsVisible = false;
+        if (_portMenuNode is not null && _portMenuPort is not null)
+            _controller.ClearPortConnections(_portMenuNode, _portMenuPort);
+        _portMenuNode = null;
+        _portMenuPort = null;
+    }
+
     private void OnPopupTitleCompleted(object? sender, EventArgs e)
     {
         if (_popupNode is null) return;
@@ -236,14 +261,23 @@ public partial class MainPage
             PopupClockEntry.Text = TrimNumber((_popupNode.ClockSpeed * 100).ToDecimalString(4, RoundingMode.Nearest));
     }
 
-    private void OnClockStepDown(object? sender, EventArgs e) => StepClock(roundCountUp: true);
+    // Off-state clock stepper increment, in percentage points.
+    private const int ClockStepPercent = 10;
 
-    private void OnClockStepUp(object? sender, EventArgs e) => StepClock(roundCountUp: false);
+    private void OnClockStepDown(object? sender, EventArgs e) => StepClock(-1);
 
-    private void StepClock(bool roundCountUp)
+    private void OnClockStepUp(object? sender, EventArgs e) => StepClock(+1);
+
+    /// <summary>Auto-Round OFF: nudge the clock by a fixed increment, clamped to the game's
+    /// (1%, 250%] range. Works regardless of the solved count (including an unconnected node
+    /// at count 0), unlike the old whole-machine rounding which no-opped there.</summary>
+    private void StepClock(int direction)
     {
         if (_popupNode is null) return;
-        _state.Editor.StepClockToWholeMachines(_popupNode, roundCountUp);
+        var newClock = _popupNode.ClockSpeed + new Rational(direction * ClockStepPercent, 100);
+        if (newClock < FactoryNode.MinClockSpeed) newClock = FactoryNode.MinClockSpeed;
+        if (newClock > FactoryNode.MaxClockSpeed) newClock = FactoryNode.MaxClockSpeed;
+        _state.Editor.SetClockSpeed(_popupNode, newClock);
         PopupClockEntry.Text = TrimNumber((_popupNode.ClockSpeed * 100).ToDecimalString(4, RoundingMode.Nearest));
     }
 
@@ -257,11 +291,9 @@ public partial class MainPage
     private void StepMachineCount(int delta)
     {
         if (_popupNode is null) return;
-        var (workload, count) = AutoRoundState(_popupNode);
-        var target = count + delta;
-        if (!CanStepTo(workload, target)) return;
-        // Stable: re-solving gives ceil(W / (W/N')) == N'. Undoable via SetProperty.
-        _state.Editor.SetClockSpeed(_popupNode, workload / target);
+        // The editor holds the throughput constant and moves a count-display Max alongside the
+        // clock so a limited node's machine count actually changes (not its output).
+        _state.Editor.StepAutoRound(_popupNode, delta);
     }
 
     /// <summary>

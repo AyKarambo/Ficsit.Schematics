@@ -76,6 +76,12 @@ public static class SfmdSerializer
             if (node.Capacity is not null) obj["Capacity"] = node.Capacity;
             // Our extension (map mode); the reference app ignores unknown keys.
             if (node.ResourceNodeId is not null) obj["ResourceNode"] = node.ResourceNodeId;
+            // Our extension (port reorder): persisted per-node display order.
+            if (node.InputOrder.Count > 0) obj["InputOrder"] = PartArray(node.InputOrder);
+            if (node.OutputOrder.Count > 0) obj["OutputOrder"] = PartArray(node.OutputOrder);
+            // Outpost boundary nodes carry their kind explicitly (Name holds the part, so it
+            // can't be recovered from the name the way specialty machines are).
+            if (node.Kind is NodeKind.Import or NodeKind.Export) obj["Kind"] = node.Kind.ToString();
             if (node.Kind == NodeKind.StorageContainer && node.StorageMode != StorageMode.PartiallyFull)
                 obj["Mode"] = StorageModeName(node.StorageMode);
 
@@ -102,6 +108,24 @@ public static class SfmdSerializer
             data.Add(obj);
         }
         return data;
+    }
+
+    private static JsonArray PartArray(List<string> parts)
+    {
+        var array = new JsonArray();
+        foreach (var part in parts) array.Add(part);
+        return array;
+    }
+
+    private static List<string> ReadParts(JsonArray array)
+    {
+        var parts = new List<string>(array.Count);
+        foreach (var element in array)
+        {
+            var value = GetString(element, string.Empty);
+            if (value.Length > 0) parts.Add(value);
+        }
+        return parts;
     }
 
     public static FactoryDocument Deserialize(string json)
@@ -146,7 +170,9 @@ public static class SfmdSerializer
             var node = new FactoryNode
             {
                 Name = name,
-                Kind = KindFor(name),
+                Kind = obj["Kind"] is { } kindNode && Enum.TryParse<NodeKind>(GetString(kindNode, string.Empty), out var explicitKind)
+                    ? explicitKind
+                    : KindFor(name),
                 X = GetDouble(obj["X"], 0),
                 Y = GetDouble(obj["Y"], 0),
                 Title = obj["Title"]?.GetValue<string>(),
@@ -165,6 +191,8 @@ public static class SfmdSerializer
                 node.ClockSpeed = clockPercent / 100;
             if (obj["Mode"] is JsonValue mode)
                 node.StorageMode = StorageModeFromName(GetString(mode, string.Empty));
+            if (obj["InputOrder"] is JsonArray inOrder) node.InputOrder = ReadParts(inOrder);
+            if (obj["OutputOrder"] is JsonArray outOrder) node.OutputOrder = ReadParts(outOrder);
 
             if (node.Kind is NodeKind.Outpost or NodeKind.Blueprint)
             {

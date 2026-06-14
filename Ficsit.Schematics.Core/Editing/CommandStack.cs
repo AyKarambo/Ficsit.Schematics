@@ -9,10 +9,18 @@ public sealed class CommandStack
     private List<EditCommand>? _group;
     private string? _groupLabel;
 
+    /// <summary>Raised when a command that affects solver results is applied/undone.</summary>
     public event Action? Changed;
+
+    /// <summary>Raised for pure geometry edits (node moves) — the view should refresh but the
+    /// graph need not be re-solved.</summary>
+    public event Action? GeometryChanged;
 
     public bool CanUndo => _undo.Count > 0;
     public bool CanRedo => _redo.Count > 0;
+
+    /// <summary>True while a transaction is open (so callers can avoid nesting groups).</summary>
+    public bool InGroup => _group is not null;
 
     /// <summary>
     /// Begin a transaction: every <see cref="Push"/> until <see cref="EndGroup"/>
@@ -80,6 +88,7 @@ public sealed class CommandStack
                 Apply = () => { previous.Apply(); command.Apply(); },
                 Revert = () => { command.Revert(); previous.Revert(); },
                 CoalesceKey = command.CoalesceKey,
+                AffectsSolve = command.AffectsSolve,
             };
         }
         else
@@ -87,7 +96,9 @@ public sealed class CommandStack
             _undo.Add(command);
         }
         _redo.Clear();
-        Changed?.Invoke();
+        // Pure geometry edits skip the re-solve (smooth dragging); everything else solves.
+        if (command.AffectsSolve) Changed?.Invoke();
+        else GeometryChanged?.Invoke();
     }
 
     /// <summary>Stops further coalescing into the latest step (e.g. at drag end).</summary>

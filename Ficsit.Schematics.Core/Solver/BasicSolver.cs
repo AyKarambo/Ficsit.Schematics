@@ -37,10 +37,14 @@ public sealed class BasicSolver(GameDatabase data) : ISolver
 
     public SolveResult Solve(FactoryDocument document)
     {
+        // Outposts/blueprints are transparent: exclude the container nodes and reroute every
+        // connection that touches one onto the matching interior boundary node (Import for
+        // an incoming part, Export for an outgoing one), which passes the flow through. This
+        // both fixes the old KeyNotFoundException and makes numbers cross the boundary.
         var nodes = document.Root.AllNodes()
             .Where(n => n.Kind is not (NodeKind.Outpost or NodeKind.Blueprint))
             .ToList();
-        var connections = document.Root.AllConnections().ToList();
+        var (connections, originalOf) = RerouteOutpostConnections(document);
 
         var states = nodes.ToDictionary(
             n => n,
@@ -88,7 +92,53 @@ public sealed class BasicSolver(GameDatabase data) : ISolver
             if (!changed) break;
         }
 
-        return BuildResult(nodes, connections, states, incoming, outgoing, flows);
+        return BuildResult(nodes, connections, originalOf, states, incoming, outgoing, flows);
+    }
+
+    /// <summary>
+    /// Build the solve-time connection set: a connection touching an outpost/blueprint
+    /// container is rerouted onto its interior boundary node for that part (Import when the
+    /// container is the consumer, Export when it is the producer), passing the flow through.
+    /// A connection with no matching boundary node is dropped. Returns the rerouted list and a
+    /// map back to the original stored connection so flows are reported on the wires the UI draws.
+    /// </summary>
+    private static (List<NodeConnection> Connections, Dictionary<NodeConnection, NodeConnection> OriginalOf)
+        RerouteOutpostConnections(FactoryDocument document)
+    {
+        var boundary = new Dictionary<(FactoryNode Container, string Part, bool Import), FactoryNode>();
+        foreach (var container in document.Root.AllNodes())
+        {
+            if (container.Kind is not (NodeKind.Outpost or NodeKind.Blueprint) || container.Children is null) continue;
+            foreach (var child in container.Children.Nodes)
+            {
+                if (child.Kind == NodeKind.Import) boundary[(container, child.Name, true)] = child;
+                else if (child.Kind == NodeKind.Export) boundary[(container, child.Name, false)] = child;
+            }
+        }
+
+        var connections = new List<NodeConnection>();
+        var originalOf = new Dictionary<NodeConnection, NodeConnection>();
+        foreach (var c in document.Root.AllConnections())
+        {
+            var from = c.From;
+            var to = c.To;
+            if (to.Kind is NodeKind.Outpost or NodeKind.Blueprint)
+            {
+                if (!boundary.TryGetValue((to, c.Part, true), out var import)) continue;
+                to = import;
+            }
+            if (from.Kind is NodeKind.Outpost or NodeKind.Blueprint)
+            {
+                if (!boundary.TryGetValue((from, c.Part, false), out var export)) continue;
+                from = export;
+            }
+            var solveConn = from == c.From && to == c.To
+                ? c
+                : new NodeConnection { From = from, To = to, Part = c.Part };
+            connections.Add(solveConn);
+            originalOf[solveConn] = c;
+        }
+        return (connections, originalOf);
     }
 
     // ------------------------------------------------------------------ counts
@@ -301,6 +351,7 @@ public sealed class BasicSolver(GameDatabase data) : ISolver
     private SolveResult BuildResult(
         List<FactoryNode> nodes,
         List<NodeConnection> connections,
+        Dictionary<NodeConnection, NodeConnection> originalOf,
         Dictionary<FactoryNode, State> states,
         Dictionary<FactoryNode, List<NodeConnection>> incoming,
         Dictionary<FactoryNode, List<NodeConnection>> outgoing,
@@ -308,8 +359,9 @@ public sealed class BasicSolver(GameDatabase data) : ISolver
     {
         var result = new SolveResult();
 
+        // Report flows on the original (stored) connections the UI draws, not the rerouted ones.
         foreach (var connection in connections)
-            result.Flows[connection] = flows[connection] ?? Rational.Zero;
+            result.Flows[originalOf[connection]] = flows[connection] ?? Rational.Zero;
 
         foreach (var node in nodes)
         {
