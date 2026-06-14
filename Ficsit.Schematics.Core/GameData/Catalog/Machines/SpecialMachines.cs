@@ -18,12 +18,12 @@ public sealed class SpecialMachines : MachineModule
                 cost: [C("Reinforced Iron Plate", 15), C("Cable", 30), C("Concrete", 45)])
             .WithFamily(4, showPpm: true, capacities:
             [
-                Cap("Mk.1 Belt", "60", isDefault: true),
-                Cap("Mk.2 Belt", "120", color: 13775920),
-                Cap("Mk.3 Belt", "270", color: 16311334),
-                Cap("Mk.4 Belt", "480", color: 8433977),
-                Cap("Mk.5 Belt", "780", color: 2504952),
-                Cap("Mk.6 Belt", "1200", color: 12330744),
+                Belt(Mark.Mk1, "60", isDefault: true),
+                Belt(Mark.Mk2, "120", color: 13775920),
+                Belt(Mark.Mk3, "270", color: 16311334),
+                Belt(Mark.Mk4, "480", color: 8433977),
+                Belt(Mark.Mk5, "780", color: 2504952),
+                Belt(Mark.Mk6, "1200", color: 12330744),
             ]),
 
         // Uploads to the Dimensional Depot at a selectable rate.

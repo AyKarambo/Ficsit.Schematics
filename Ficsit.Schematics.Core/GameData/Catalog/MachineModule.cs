@@ -45,31 +45,47 @@ public abstract class MachineModule
         => new([(sort, Def(name, tier, power, minPower, basePower, basePowerBoost,
             fueledBasePowerBoost, overclockExp, sloops, sloopMultiplier, sloopPowerExp, cost))]);
 
-    /// <summary>A multi-mark family (e.g. the Miner): the marks ARE the machines, and recipes
-    /// target the family <paramref name="name"/>.</summary>
+    /// <summary>A multi-mark family (e.g. the Miner): each mark is a machine named
+    /// "{name} Mk.{n}", and recipes target the family <paramref name="name"/>.</summary>
     protected static MachineGroup Family(int familySort, string name,
         bool showPpm = false, bool autoRound = true, string defaultMax = "",
         MarkSpec[]? marks = null, MultiMachineCapacity[]? capacities = null)
     {
         marks ??= [];
+        var machines = new List<(int, MachineDefinition)>();
+        var variants = new List<MultiMachineVariant>();
+        foreach (var mark in marks)
+        {
+            var markName = $"{name} Mk.{(int)mark.Mark}";
+            machines.Add((mark.Sort, Def(markName, mark.Tier, mark.Power, overclockExp: StandardOverclock, cost: mark.Cost)));
+            variants.Add(new MultiMachineVariant
+            {
+                Name = markName,
+                PartsRatio = Rational.Parse(mark.Throughput),
+                Default = mark.IsDefault,
+            });
+        }
         var family = new MultiMachineDefinition
         {
             Name = name,
             ShowPpm = showPpm,
             AutoRound = autoRound,
             DefaultMax = defaultMax,
-            Machines = marks.Select(mark => mark.Variant).ToList(),
+            Machines = variants,
             Capacities = (capacities ?? []).ToList(),
         };
-        return new MachineGroup(marks.Select(mark => (mark.Sort, mark.Machine)).ToList(), familySort, family);
+        return new MachineGroup(machines, familySort, family);
     }
 
-    /// <summary>One mark of a multi-mark family: a machine plus its throughput multiplier.</summary>
-    protected static MarkSpec Mark(int sort, string name, Tier tier, string throughput,
+    /// <summary>One mark of a multi-mark family: its <see cref="Mark"/> plus per-mark stats.
+    /// The family derives the name ("{family} Mk.{n}").</summary>
+    protected static MarkSpec Variant(int sort, Mark mark, Tier tier, string throughput,
         bool isDefault = false, string? power = null, CostEntry[]? cost = null)
-        => new(sort,
-            Def(name, tier, power, overclockExp: StandardOverclock, cost: cost),
-            new MultiMachineVariant { Name = name, PartsRatio = Rational.Parse(throughput), Default = isDefault });
+        => new(sort, mark, tier, throughput, isDefault, power, cost);
+
+    /// <summary>A belt-mark capacity ("Mk.{n} Belt"), e.g. for the AWESOME Sink.</summary>
+    protected static MultiMachineCapacity Belt(Mark mark, string throughput, int? color = null, bool isDefault = false)
+        => new() { Name = $"Mk.{(int)mark} Belt", PartsRatio = Rational.Parse(throughput), Color = color, Default = isDefault };
 
     /// <summary>A build-cost entry.</summary>
     protected static CostEntry C(string part, int amount) => new() { Part = part, Amount = amount };

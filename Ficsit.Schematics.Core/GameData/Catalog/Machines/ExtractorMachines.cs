@@ -11,12 +11,12 @@ public sealed class ExtractorMachines : MachineModule
         Family(0, "Miner", showPpm: true, autoRound: false, defaultMax: "60",
             marks:
             [
-                Mark(4,  "Miner Mk.1", "0-5", throughput: "60", isDefault: true,
-                     power: "-5",  cost: [C("Portable Miner", 1), C("Iron Plate", 10), C("Concrete", 10)]),
-                Mark(14, "Miner Mk.2", "4-3", throughput: "120",
-                     power: "-15", cost: [C("Portable Miner", 2), C("Encased Industrial Beam", 10), C("Steel Pipe", 20), C("Modular Frame", 10)]),
-                Mark(26, "Miner Mk.3", "8-4", throughput: "240",
-                     power: "-45", cost: [C("Portable Miner", 3), C("Steel Pipe", 50), C("Supercomputer", 5), C("Fused Modular Frame", 10), C("Turbo Motor", 3)]),
+                Variant(4,  Mark.Mk1, "0-5", throughput: "60", isDefault: true,
+                        power: "-5",  cost: [C("Portable Miner", 1), C("Iron Plate", 10), C("Concrete", 10)]),
+                Variant(14, Mark.Mk2, "4-3", throughput: "120",
+                        power: "-15", cost: [C("Portable Miner", 2), C("Encased Industrial Beam", 10), C("Steel Pipe", 20), C("Modular Frame", 10)]),
+                Variant(26, Mark.Mk3, "8-4", throughput: "240",
+                        power: "-45", cost: [C("Portable Miner", 3), C("Steel Pipe", 50), C("Supercomputer", 5), C("Fused Modular Frame", 10), C("Turbo Motor", 3)]),
             ],
             capacities: Purity),
 
