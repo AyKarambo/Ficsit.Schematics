@@ -31,11 +31,11 @@ public sealed class SpecialMachines : MachineModule
                 cost: [C("Mercer Sphere", 1), C("SAM Fluctuator", 10), C("Modular Frame", 10), C("Wire", 100)])
             .WithFamily(3, showPpm: true, capacities:
             [
-                Cap("15/min", 15, isDefault: true),
-                Cap("30/min", 30, color: 13775920),
-                Cap("60/min", 60, color: 16311334),
-                Cap("120/min", 120, color: 8433977),
-                Cap("240/min", 240, color: 12330744),
+                Upload(15, isDefault: true),
+                Upload(30, color: 13775920),
+                Upload(60, color: 16311334),
+                Upload(120, color: 8433977),
+                Upload(240, color: 12330744),
             ]),
     ];
 }

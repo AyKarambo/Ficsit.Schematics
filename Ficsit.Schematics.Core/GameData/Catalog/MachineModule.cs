@@ -26,12 +26,12 @@ public abstract class MachineModule
     /// <summary>An exact fraction from its canonical string (e.g. "1/2"); whole numbers use int literals.</summary>
     protected static Rational R(string text) => Rational.Parse(text);
 
-    /// <summary>Resource-node purity capacities (×½ / ×1 / ×2), shared by the extractor families.</summary>
-    protected static MultiMachineCapacity[] Purity =>
+    /// <summary>Resource-node purity capacities (Impure ×½, Normal ×1, Pure ×2), shared by extractors.</summary>
+    protected static MultiMachineCapacity[] Purities =>
     [
-        Cap("Impure", R("1/2"), color: 13775920),
-        Cap("Normal", isDefault: true),
-        Cap("Pure", 2, color: 8433977),
+        Cap(Purity.Impure, parts: R("1/2")),
+        Cap(Purity.Normal),
+        Cap(Purity.Pure, parts: 2),
     ];
 
     // ------------------------------------------------------------------ builders
@@ -92,10 +92,21 @@ public abstract class MachineModule
     /// <summary>A build-cost entry.</summary>
     protected static CostEntry C(string part, int amount) => new() { Part = part, Amount = amount };
 
-    /// <summary>A family capacity mode (resource purity, belt mark, upload rate, …).</summary>
-    protected static MultiMachineCapacity Cap(string name, Rational? partsRatio = null,
-        int? color = null, bool isDefault = false, Rational? powerRatio = null)
-        => new() { Name = name, PartsRatio = partsRatio, Color = color, Default = isDefault, PowerRatio = powerRatio };
+    /// <summary>A purity capacity (Impure ×½, Normal ×1, Pure ×2): <paramref name="parts"/> scales the
+    /// extraction rate, <paramref name="power"/> the Geothermal's output. Accent color is by purity.</summary>
+    protected static MultiMachineCapacity Cap(Purity purity, Rational? parts = null, Rational? power = null)
+        => new()
+        {
+            Name = purity.ToString(),
+            PartsRatio = parts,
+            PowerRatio = power,
+            Default = purity == Purity.Normal,
+            Color = purity switch { Purity.Impure => 13775920, Purity.Pure => 8433977, _ => (int?)null },
+        };
+
+    /// <summary>An upload-rate capacity ("{n}/min"), e.g. for the Dimensional Depot Uploader.</summary>
+    protected static MultiMachineCapacity Upload(int perMinute, int? color = null, bool isDefault = false)
+        => new() { Name = $"{perMinute}/min", PartsRatio = perMinute, Color = color, Default = isDefault };
 
     private static MachineDefinition Def(string name, Tier tier,
         Rational? power, Rational? minPower, Rational? basePower, Rational? basePowerBoost,

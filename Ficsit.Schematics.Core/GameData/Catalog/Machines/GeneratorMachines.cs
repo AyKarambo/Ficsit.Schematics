@@ -20,9 +20,9 @@ public sealed class GeneratorMachines : MachineModule
                 cost: [C("Motor", 10), C("High-Speed Connector", 25), C("Modular Frame", 25), C("Copper Sheet", 50), C("Wire", 250)])
             .WithFamily(5, defaultMax: "1", capacities:
             [
-                Cap("Impure", color: 13775920, powerRatio: R("1/2")),
-                Cap("Normal", isDefault: true),
-                Cap("Pure", color: 8433977, powerRatio: 2),
+                Cap(Purity.Impure, power: R("1/2")),
+                Cap(Purity.Normal),
+                Cap(Purity.Pure, power: 2),
             ]),
 
         // Boosts grid power rather than generating from a fuel recipe.

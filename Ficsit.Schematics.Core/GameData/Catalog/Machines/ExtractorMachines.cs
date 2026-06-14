@@ -18,16 +18,16 @@ public sealed class ExtractorMachines : MachineModule
                 Variant(26, Mark.Mk3, "8-4", throughput: 240,
                         power: -45, cost: [C("Portable Miner", 3), C("Steel Pipe", 50), C("Supercomputer", 5), C("Fused Modular Frame", 10), C("Turbo Motor", 3)]),
             ],
-            capacities: Purity),
+            capacities: Purities),
 
         // Single machines that still snap to nodes of three purities → capacity-only families.
         Machine(16, "Oil Extractor", "5-2", power: -40, overclockExp: StandardOverclock,
                 cost: [C("Motor", 15), C("Encased Industrial Beam", 20), C("Cable", 60)])
-            .WithFamily(1, showPpm: true, autoRound: false, defaultMax: "120", capacities: Purity),
+            .WithFamily(1, showPpm: true, autoRound: false, defaultMax: "120", capacities: Purities),
 
         Machine(24, "Resource Well Extractor", "8-3",
                 cost: [C("Steel Beam", 10), C("Aluminum Casing", 10)])
-            .WithFamily(2, showPpm: true, defaultMax: "60", capacities: Purity),
+            .WithFamily(2, showPpm: true, defaultMax: "60", capacities: Purities),
 
         // Plain extractors (no marks, no purity choice).
         Machine(10, "Water Extractor", "3-1", power: -20, overclockExp: StandardOverclock,
