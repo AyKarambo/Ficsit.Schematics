@@ -74,10 +74,10 @@ public sealed class NodeLayout
     public List<PortInfo> Inputs { get; } = [];
     public List<PortInfo> Outputs { get; } = [];
 
-    public static NodeLayout Compute(FactoryNode node, GameDatabase data, FactoryGraph scope, bool mapCompact = false)
+    public static NodeLayout Compute(FactoryNode node, GameDatabase data, FactoryGraph scope, bool mapCompact = false, PointF? positionOverride = null)
     {
-        var x = (float)node.X;
-        var y = (float)node.Y;
+        var x = positionOverride?.X ?? (float)node.X;
+        var y = positionOverride?.Y ?? (float)node.Y;
 
         // Map-snapped extractor: a marker-sized badge with one value chip and a
         // single output port. Editing still happens through the popup.
@@ -105,8 +105,8 @@ public sealed class NodeLayout
             return specialty;
         }
 
-        // Outpost boundary handle: a small item badge. Import provides its part to the interior
-        // (output port on the right); Export consumes from the interior (input port on the left).
+        // Outpost boundary handle: the whole badge IS its port (one item), so it can be grabbed
+        // anywhere to wire — and it is pinned to the canvas edge (positionOverride), not movable.
         if (node.Kind is NodeKind.Import or NodeKind.Export)
         {
             var box = new RectF(x, y, SpecialtySize, SpecialtySize);
@@ -119,8 +119,7 @@ public sealed class NodeLayout
                 HasLimitRow = false,
             };
             var isImport = node.Kind == NodeKind.Import;
-            PlacePorts(isImport ? handle.Outputs : handle.Inputs, [node.Name],
-                isImport ? box.Right - PortSize : box.Left, box.Top, box.Height, isInput: !isImport);
+            (isImport ? handle.Outputs : handle.Inputs).Add(new PortInfo(node.Name, box, !isImport));
             return handle;
         }
 

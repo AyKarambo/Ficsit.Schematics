@@ -38,6 +38,14 @@ public sealed class FactoryCanvasDrawable(AppState state, IconStore icons, Numbe
     private readonly Dictionary<FactoryNode, NodeLayout> _layouts = [];
     private bool _layoutsDirty = true;
 
+    // Outpost boundary handles are pinned to the canvas edges (imports left, exports right) so
+    // they stay put while the interior pans/zooms. Stored in screen pixels; the layout converts
+    // to world per frame (the controller re-invalidates layouts on pan/zoom inside an outpost).
+    private SizeF _viewport;
+    private const float RailMarginPx = 16f;
+    private const float RailTopPx = 112f;
+    private const float RailGapPx = 12f;
+
     // Text measurement is the dominant per-frame cost when panning (one GetStringSize per
     // port/connection label per frame). The size of a given (text, fontSize) pair never
     // changes — the font is constant — so memoize it; pan holds zoom (hence fontSize) fixed,
@@ -55,9 +63,28 @@ public sealed class FactoryCanvasDrawable(AppState state, IconStore icons, Numbe
                 _layouts.Clear();
                 var graph = state.Editor.Graph;
                 var mapCompact = MapActive;
+                var importIndex = 0;
+                var exportIndex = 0;
                 // Only the nodes in the current scope (members of the active outpost) are laid out.
                 foreach (var node in state.Editor.VisibleNodes)
-                    _layouts[node] = NodeLayout.Compute(node, state.Data, graph, mapCompact);
+                {
+                    if (node.Kind is NodeKind.Import or NodeKind.Export)
+                    {
+                        var isImport = node.Kind == NodeKind.Import;
+                        var i = isImport ? importIndex++ : exportIndex++;
+                        var sizePx = NodeLayout.SpecialtySize * Zoom;
+                        var screenX = isImport
+                            ? RailMarginPx
+                            : MathF.Max(RailMarginPx, _viewport.Width - RailMarginPx - sizePx);
+                        var screenY = RailTopPx + i * (sizePx + RailGapPx);
+                        var world = ScreenToWorld(new PointF(screenX, screenY));
+                        _layouts[node] = NodeLayout.Compute(node, state.Data, graph, mapCompact, world);
+                    }
+                    else
+                    {
+                        _layouts[node] = NodeLayout.Compute(node, state.Data, graph, mapCompact);
+                    }
+                }
                 _layoutsDirty = false;
             }
             return _layouts;
@@ -83,6 +110,7 @@ public sealed class FactoryCanvasDrawable(AppState state, IconStore icons, Numbe
 
     public void Draw(ICanvas canvas, RectF dirtyRect)
     {
+        _viewport = new SizeF(dirtyRect.Width, dirtyRect.Height);
         canvas.FillColor = Theme.Background;
         canvas.FillRectangle(dirtyRect);
 
@@ -351,7 +379,7 @@ public sealed class FactoryCanvasDrawable(AppState state, IconStore icons, Numbe
             return;
         }
 
-        // Outpost boundary handle: the part icon plus its single port (shown inside the outpost).
+        // Outpost boundary handle (pinned at the edge): the whole badge is the item port.
         if (node.Kind is NodeKind.Import or NodeKind.Export)
         {
             canvas.FillColor = Theme.CardBackground;
@@ -359,9 +387,6 @@ public sealed class FactoryCanvasDrawable(AppState state, IconStore icons, Numbe
             canvas.StrokeColor = selected ? Theme.SelectedBorder : Theme.CardBorder;
             canvas.StrokeSize = selected ? 2f : 1f;
             canvas.DrawRoundedRectangle(layout.Bounds, corner);
-            var partIcon = icons.GetImage(node.Name);
-            if (partIcon is not null)
-                canvas.DrawImage(partIcon, layout.ImageRect.X, layout.ImageRect.Y, layout.ImageRect.Width, layout.ImageRect.Height);
             foreach (var port in layout.Inputs) DrawPort(canvas, layout, port, nodeResult);
             foreach (var port in layout.Outputs) DrawPort(canvas, layout, port, nodeResult);
             return;
