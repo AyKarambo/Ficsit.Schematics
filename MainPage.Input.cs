@@ -37,9 +37,15 @@ public partial class MainPage
                 _controller.PointerMoved(pos, leftDown, rightDown);
 
                 if (!leftDown && !rightDown)
+                {
+                    if (_controller.UpdateHover(pos)) Canvas.Invalidate();
                     UpdateHoverTooltip(pos);
-                else if (_lastTooltip is not null)
-                    UpdateHoverTooltip(null);
+                }
+                else
+                {
+                    if (_controller.UpdateHover(null)) Canvas.Invalidate();
+                    if (_lastTooltip is not null) UpdateHoverTooltip(null);
+                }
             };
 
             canvasNative.PointerReleased += (s, e) =>
@@ -63,7 +69,11 @@ public partial class MainPage
                 e.Handled = true;
             };
 
-            canvasNative.PointerExited += (_, _) => UpdateHoverTooltip(null);
+            canvasNative.PointerExited += (_, _) =>
+            {
+                if (_controller.UpdateHover(null)) Canvas.Invalidate();
+                UpdateHoverTooltip(null);
+            };
         }
 
         if (Handler?.PlatformView is Microsoft.UI.Xaml.UIElement pageNative)

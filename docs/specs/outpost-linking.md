@@ -1,5 +1,7 @@
 # Outpost linking: crash fix + side-aware connections (#14)
 
+> **Status: ✅ Implemented — now superseded by [outpost-flat-model.md](outpost-flat-model.md). Kept for history.**
+
 ## Problem
 
 ### A. App crash (the urgent part)

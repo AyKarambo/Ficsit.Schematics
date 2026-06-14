@@ -8,6 +8,18 @@ public sealed partial class CanvasController
 {
     // ------------------------------------------------------------------- misc
 
+    /// <summary>Track the node under the cursor for focus highlighting. Returns true when it
+    /// changed (the host should redraw). Cleared while a gesture is in flight.</summary>
+    public bool UpdateHover(PointF? screen)
+    {
+        FactoryNode? node = null;
+        if (screen is { } s && !IsInteracting)
+            (node, _) = HitNode(drawable.ScreenToWorld(s));
+        if (ReferenceEquals(drawable.HoverNode, node)) return false;
+        drawable.HoverNode = node;
+        return true;
+    }
+
     public void Wheel(PointF screen, int delta)
         => ZoomAround(screen, (float)Math.Pow(1.1, delta / 120.0));
 
@@ -45,6 +57,43 @@ public sealed partial class CanvasController
             drawable.PanY = viewport.Height / 2 - bounds.Center.Y * zoom;
         }
         SyncPanToDocument();
+        Invalidate?.Invoke();
+    }
+
+    /// <summary>
+    /// Tidy the selected nodes into dependency layers in place (anchored at the
+    /// selection's top-left), as one undoable move. Right-click "Format selection".
+    /// </summary>
+    public void FormatSelection()
+    {
+        var nodes = state.Selection.ToList();
+        if (nodes.Count < 2) return;
+
+        var originX = nodes.Min(n => n.X);
+        var originY = nodes.Min(n => n.Y);
+        var targets = FactoryAutoLayout.Arrange(nodes, state.Editor.Graph, originX, originY);
+
+        // One undo step; suspended so the grouped moves don't each re-solve.
+        using (state.Editor.SuspendSolve())
+        {
+            state.Editor.Commands.BeginGroup("Format selection");
+            foreach (var node in nodes)
+                if (targets.TryGetValue(node, out var pos))
+                    state.Editor.MoveNodes([node], pos.X - node.X, pos.Y - node.Y, coalesce: false);
+            state.Editor.Commands.EndGroup();
+        }
+
+        drawable.InvalidateLayouts();
+        Invalidate?.Invoke();
+    }
+
+    /// <summary>Collapse the selected machines into a new outpost (right-click "Group into outpost").</summary>
+    public void GroupSelection()
+    {
+        if (state.Selection.Count < 2) return;
+        var outpost = state.Editor.GroupIntoOutpost(state.Selection.ToList(), null);
+        if (outpost is not null) state.SetSelection([outpost]);
+        drawable.InvalidateLayouts();
         Invalidate?.Invoke();
     }
 

@@ -23,12 +23,20 @@ public static class FactoryPlanner
     private static readonly Rational SinkPenaltyEliminate = new(1_000_000);
     private static readonly Rational SinkPenaltyAllowed = new(1, 1_000_000);
 
-    public static PlanResult Plan(GameDatabase data, PlanRequest request, IReadOnlyList<ResourceNodeInfo>? mapNodes = null)
+    public static PlanResult Plan(
+        GameDatabase data, PlanRequest request, IReadOnlyList<ResourceNodeInfo>? mapNodes = null,
+        IProgress<PlanProgress>? progress = null, CancellationToken cancellationToken = default)
     {
         if (request.Targets.Count == 0)
             return new PlanResult { Status = PlanStatus.Infeasible };
 
+        progress?.Report(new PlanProgress("Collecting recipes"));
         var weights = ScarcityWeights.Build(mapNodes);
+        // The user's resource-preference budget biases the baseline scarcity weights:
+        // a multiplier < 1 makes a raw cheaper (the plan reaches for it), > 1 dearer.
+        foreach (var (part, multiplier) in request.WeightMultipliers)
+            if (weights.TryGetValue(part, out var weight))
+                weights[part] = weight * multiplier;
         var exclusiveParts = request.Provisions.Where(p => p.Exclusive).Select(p => p.Part).ToHashSet();
         var recipes = CollectCandidateRecipes(data, request, exclusiveParts, out var parts);
 
@@ -196,10 +204,11 @@ public static class FactoryPlanner
         if (hasBundle)
         {
             // Stage 1: how much of the bundle is achievable at all?
+            progress?.Report(new PlanProgress("Maximizing achievable output"));
             var stage1Costs = new Rational[n];
             Array.Fill(stage1Costs, Rational.Zero);
             stage1Costs[bundleColumn] = -Rational.One;
-            var stage1 = RevisedSimplexSolver.Minimize(baseMatrix, b, stage1Costs);
+            var stage1 = RevisedSimplexSolver.Minimize(baseMatrix, b, stage1Costs, cancellationToken);
             if (stage1.Status != PlanStatus.Optimal)
                 return new PlanResult { Status = stage1.Status };
             achieved = stage1.Values[bundleColumn];
@@ -219,13 +228,15 @@ public static class FactoryPlanner
             Array.Copy(b, bExtended, rowCount);
             bExtended[rowCount] = achieved;
 
+            progress?.Report(new PlanProgress("Solving"));
             solution = stage1.Snapshot is { } snapshot
-                ? RevisedSimplexSolver.MinimizeWarm(extendedMatrix, bExtended, costArray, snapshot, bundleColumn)
-                : RevisedSimplexSolver.Minimize(extendedMatrix, bExtended, costArray);
+                ? RevisedSimplexSolver.MinimizeWarm(extendedMatrix, bExtended, costArray, snapshot, bundleColumn, cancellationToken)
+                : RevisedSimplexSolver.Minimize(extendedMatrix, bExtended, costArray, cancellationToken);
         }
         else
         {
-            solution = RevisedSimplexSolver.Minimize(baseMatrix, b, costArray);
+            progress?.Report(new PlanProgress("Solving"));
+            solution = RevisedSimplexSolver.Minimize(baseMatrix, b, costArray, cancellationToken);
         }
         if (solution.Status != PlanStatus.Optimal)
             return new PlanResult { Status = solution.Status };
@@ -319,6 +330,19 @@ public static class FactoryPlanner
                 }
             }
         }
+    }
+
+    /// <summary>
+    /// Recipe names unlocked above the given progression tier (phase). The
+    /// Auto-Plan "available up to tier" cap maps these onto DisabledRecipes so the
+    /// planner never reaches for a machine the player hasn't built yet (e.g. the
+    /// Blender). Alternates are filtered by their own tier like any other recipe.
+    /// </summary>
+    public static IEnumerable<string> RecipesAboveTier(GameDatabase data, int maxPhase)
+    {
+        foreach (var recipe in data.Document.Recipes)
+            if (recipe.Tier.Phase > maxPhase)
+                yield return recipe.Name;
     }
 
     // ------------------------------------------------------------- internals

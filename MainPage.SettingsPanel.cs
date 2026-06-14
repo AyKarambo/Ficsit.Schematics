@@ -67,6 +67,22 @@ public partial class MainPage
         Canvas.Invalidate();
     }
 
+    private void OnColorWiresToggled(object? sender, ToggledEventArgs e)
+    {
+        if (_initializing) return;
+        _state.Settings.WireColorByPart = e.Value;
+        _state.SaveSettings();
+        Canvas.Invalidate();
+    }
+
+    private void OnFocusHighlightToggled(object? sender, ToggledEventArgs e)
+    {
+        if (_initializing) return;
+        _state.Settings.FocusHighlight = e.Value;
+        _state.SaveSettings();
+        Canvas.Invalidate();
+    }
+
     private void OnMultiplierChanged(object? sender, EventArgs e)
     {
         if (_initializing) return;

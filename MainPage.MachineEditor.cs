@@ -245,6 +245,26 @@ public partial class MainPage
         _portMenuPort = null;
     }
 
+    private void ShowSelectionMenu(IReadOnlyList<FactoryNode> nodes, PointF screen)
+    {
+        var pos = ClampToPage(screen, 170, 76);
+        SelectionMenu.TranslationX = pos.X;
+        SelectionMenu.TranslationY = pos.Y;
+        SelectionMenu.IsVisible = true;
+    }
+
+    private void OnSelectionMenuFormat(object? sender, EventArgs e)
+    {
+        SelectionMenu.IsVisible = false;
+        _controller.FormatSelection();
+    }
+
+    private void OnSelectionMenuGroup(object? sender, EventArgs e)
+    {
+        SelectionMenu.IsVisible = false;
+        _controller.GroupSelection();
+    }
+
     private void OnPopupTitleCompleted(object? sender, EventArgs e)
     {
         if (_popupNode is null) return;

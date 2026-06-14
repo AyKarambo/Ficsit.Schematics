@@ -1,5 +1,7 @@
 # Drag-to-reorder a node's input/output ports (#12)
 
+> **Status: ✅ Implemented.**
+
 ## Problem
 
 A node's ports are positioned in a fixed, derived order, so the user cannot rearrange them

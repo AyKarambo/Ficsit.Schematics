@@ -1,5 +1,7 @@
 # Map mode: extractor size & node interaction (#4)
 
+> **Status: ✅ Implemented.**
+
 ## Problem
 
 On the world map (7500-unit canvas, `Canvas/MapGeometry.cs`), resource node markers

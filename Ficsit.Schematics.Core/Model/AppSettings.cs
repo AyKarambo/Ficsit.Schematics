@@ -29,6 +29,12 @@ public sealed class AppSettings
     /// <summary>Connection style: Curves | Direct | 2D.</summary>
     public string Path { get; set; } = "Curves";
 
+    /// <summary>Colour each wire by the part it carries, so belts are traceable. Default on.</summary>
+    public bool WireColorByPart { get; set; } = true;
+
+    /// <summary>Hovering/selecting one machine fades everything but its connections. Default on.</summary>
+    public bool FocusHighlight { get; set; } = true;
+
     /// <summary>Render the world map (with imported resource nodes) behind the canvas.</summary>
     public bool ShowMap { get; set; }
 
@@ -63,6 +69,35 @@ public sealed class AppSettings
     /// is stored so recipes added by future data updates default to enabled.
     /// </summary>
     public List<string> PlannerDisabledRecipes { get; set; } = [];
+
+    /// <summary>
+    /// Auto-planner: the user's resource-preference budget — a slider position per
+    /// extractable raw (see <see cref="Planning.ScarcityWeights.WeightedResources"/>).
+    /// Empty means neutral: every raw equal, i.e. the built-in scarcity defaults
+    /// untouched. Only the relative split matters, so the values need not sum to any
+    /// particular total. This is the global default the Auto-Plan panel restores to.
+    /// </summary>
+    public Dictionary<string, int> PlannerResourcePreferences { get; set; } = [];
+
+    /// <summary>
+    /// Auto-planner: only use recipes unlocked up to this progression tier (phase),
+    /// so plans don't reach for machines the player hasn't built. 99 = no cap (all
+    /// tiers). The Auto-Plan picker writes this; it maps onto DisabledRecipes via
+    /// <see cref="Planning.FactoryPlanner.RecipesAboveTier"/>.
+    /// </summary>
+    public int PlannerMaxTierPhase { get; set; } = 99;
+
+    /// <summary>
+    /// Auto-planner: skip the draft review and build straight onto the canvas when a
+    /// plan completes. Default off — plans are reviewed before they touch the canvas.
+    /// </summary>
+    public bool PlannerAutoApply { get; set; }
+
+    /// <summary>
+    /// Auto-planner: collapse each key-intermediate sub-chain into a named outpost when
+    /// a plan is applied, so a dense plan reads as a handful of blocks. Default on.
+    /// </summary>
+    public bool PlannerAutoCollapse { get; set; } = true;
 
     public static Dictionary<string, NumberFormatSetting> DefaultNumbers() => new()
     {

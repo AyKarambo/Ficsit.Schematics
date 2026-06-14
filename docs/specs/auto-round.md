@@ -1,5 +1,7 @@
 # Auto-Round: whole machines with rebalanced clock (#1)
 
+> **Status: ✅ Implemented.**
+
 ## Problem
 
 The Auto-Round flag exists end-to-end as data — `FactoryNode.AutoRound`

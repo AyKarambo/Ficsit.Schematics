@@ -32,6 +32,8 @@ public partial class MainPage
 
         PlanExcludeManualLabel.Text = "Exclude hand-gathered parts";
         PlanOreConversionLabel.Text = "Allow ore conversion";
+        PlanAutoApplyLabel.Text = "Apply plans without review";
+        PlanAutoCollapseLabel.Text = "Group plans into outposts";
         PlanRecipesButton.Text = "Recipes…";
 
         SettingsPlannerHeader.Text = "AUTO-PLANNER";
@@ -49,7 +51,23 @@ public partial class MainPage
         PlanOreConversionSwitch.IsToggled = _state.Settings.PlannerAllowOreConversion;
         SettingsExcludeManualSwitch.IsToggled = _state.Settings.PlannerExcludeManualParts;
         SettingsOreConversionSwitch.IsToggled = _state.Settings.PlannerAllowOreConversion;
+        PlanAutoApplySwitch.IsToggled = _state.Settings.PlannerAutoApply;
+        PlanAutoCollapseSwitch.IsToggled = _state.Settings.PlannerAutoCollapse;
         _initializing = wasInitializing;
+    }
+
+    private void OnPlanAutoApplyToggled(object? sender, ToggledEventArgs e)
+    {
+        if (_initializing) return;
+        _state.Settings.PlannerAutoApply = e.Value;
+        _state.SaveSettings();
+    }
+
+    private void OnPlanAutoCollapseToggled(object? sender, ToggledEventArgs e)
+    {
+        if (_initializing) return;
+        _state.Settings.PlannerAutoCollapse = e.Value;
+        _state.SaveSettings();
     }
 
     private void OnPlanExcludeManualToggled(object? sender, ToggledEventArgs e)

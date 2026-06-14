@@ -28,6 +28,12 @@ public sealed partial class FactoryCanvasDrawable(AppState state, IconStore icon
     /// <summary>The resource marker a dragged extractor would snap to; drawn highlighted.</summary>
     public ResourceNodeInfo? SnapPreviewMarker { get; set; }
 
+    /// <summary>The node currently under the cursor — drives focus highlighting (fade the rest).</summary>
+    public FactoryNode? HoverNode { get; set; }
+
+    /// <summary>Opacity for everything outside the focused node's neighborhood.</summary>
+    private const float DimAlpha = 0.16f;
+
     /// <summary>While reordering a port, the world-space insertion slot (x, y, width) drawn as
     /// a short bar between ports.</summary>
     public (float X, float Y, float Width)? PortInsertLine { get; set; }
@@ -115,6 +121,30 @@ public sealed partial class FactoryCanvasDrawable(AppState state, IconStore icon
         return cur;
     }
 
+    /// <summary>The node to focus on: the hovered node, else the lone selected node.
+    /// Null when focus highlighting is off or nothing singular is targeted.</summary>
+    private FactoryNode? FocusNode()
+    {
+        if (!state.Settings.FocusHighlight) return null;
+        if (HoverNode is not null) return HoverNode;
+        return state.Selection.Count == 1 ? state.Selection[0] : null;
+    }
+
+    /// <summary>The focus node plus every node it directly connects to (in this scope).</summary>
+    private HashSet<FactoryNode>? FocusNeighbors(FactoryNode? focus)
+    {
+        if (focus is null) return null;
+        var neighbors = new HashSet<FactoryNode> { focus };
+        foreach (var connection in state.Editor.Graph.Connections)
+        {
+            var from = VisibleRep(connection.From);
+            var to = VisibleRep(connection.To);
+            if (from == focus && to is not null) neighbors.Add(to);
+            else if (to == focus && from is not null) neighbors.Add(from);
+        }
+        return neighbors;
+    }
+
     public void Draw(ICanvas canvas, RectF dirtyRect)
     {
         _viewport = new SizeF(dirtyRect.Width, dirtyRect.Height);
@@ -134,14 +164,30 @@ public sealed partial class FactoryCanvasDrawable(AppState state, IconStore icon
         var result = state.Editor.Result;
         var layouts = Layouts;
 
+        // Focus highlighting: fade everything but the hovered/selected node and what
+        // it connects to, so a dense graph can be read one machine at a time.
+        var focus = FocusNode();
+        var focusNeighbors = FocusNeighbors(focus);
+
         // Connections are flat; each end maps to its visible representative (the node itself
         // or the outpost box it sits inside). Cross-boundary wires draw to the box.
         foreach (var connection in state.Editor.Graph.Connections)
+        {
+            if (focus is not null)
+                canvas.Alpha = VisibleRep(connection.From) == focus || VisibleRep(connection.To) == focus
+                    ? 1f : DimAlpha;
             DrawConnection(canvas, connection, layouts, result);
+        }
+        canvas.Alpha = 1f;
 
         foreach (var node in state.Editor.VisibleNodes)
             if (layouts.TryGetValue(node, out var layout))
+            {
+                if (focus is not null)
+                    canvas.Alpha = focusNeighbors!.Contains(node) ? 1f : DimAlpha;
                 DrawNode(canvas, layout, result);
+            }
+        canvas.Alpha = 1f;
 
         if (PortInsertLine is { } ins)
         {

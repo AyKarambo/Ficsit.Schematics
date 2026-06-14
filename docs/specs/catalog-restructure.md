@@ -1,5 +1,7 @@
 # Catalog restructure: category base classes & subfolders (#7, #8)
 
+> **Status: ✅ Implemented.**
+
 ## Problem
 
 `Ficsit.Schematics.Core/GameData/Catalog/` is flat and lightly structured:

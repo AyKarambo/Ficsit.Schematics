@@ -1,5 +1,7 @@
 # Auto-Planner recipe control (#5, #6)
 
+> **Status: ✅ Implemented.**
+
 ## Problem
 
 1. **#5** — The planner's recipe pool is all-or-nothing: `PlanRequest.UseAlternateRecipes`

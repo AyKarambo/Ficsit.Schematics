@@ -1,5 +1,7 @@
 # UI readability & UX (#2, #3, #9, #10)
 
+> **Status: ✅ Implemented.**
+
 ## #2 — Output icons in the recipe chooser
 
 **Problem:** recipe rows are hard to tell apart, especially alternates.

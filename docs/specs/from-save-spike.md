@@ -1,5 +1,7 @@
 # "From save" unlocked-alternates import — research spike
 
+> **Status: 📚 Research spike — investigation complete; informs [planner-recipe-control.md](planner-recipe-control.md). Not a standalone feature to implement.**
+
 Spike for [planner-recipe-control.md](planner-recipe-control.md) Phase 5. Goal:
 can we read the set of **unlocked alternate recipes** from a Satisfactory `.sav`
 so the planner's "From save" button enables exactly those alternates?

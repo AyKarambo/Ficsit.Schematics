@@ -263,6 +263,88 @@ public class FactoryPlannerTests
         Assert.Contains(onPlan.Recipes, r => conversionRecipes.Contains(r.Recipe));
     }
 
+    /// <summary>
+    /// The resource-preference budget biases the scarcity weights. Steel can be made
+    /// from coal (standard recipe) or oil (the Coke Steel Ingot → Petroleum Coke
+    /// chain); penalizing one raw flips the planner onto the other — proving
+    /// WeightMultipliers reaches the objective in both directions.
+    /// </summary>
+    [Fact]
+    public void Resource_preference_flips_steel_between_coal_and_oil()
+    {
+        PlanRequest Build()
+        {
+            // Exclude hand-gathered parts so steel's carbon comes from mined coal or
+            // oil, not the free Biocoal-from-alien-remains chain.
+            var r = new PlanRequest { Bias = PlanBias.Resources, Byproducts = ByproductMode.AllowSink };
+            ExcludeManualParts(r);
+            r.Targets.Add(new PlanTarget("Steel Ingot", new Rational(60)));
+            return r;
+        }
+
+        var preferCoal = Build();
+        preferCoal.WeightMultipliers["Crude Oil"] = new Rational(50); // oil dear → coke route out
+        var coalPlan = FactoryPlanner.Plan(TestData.Database, preferCoal);
+        Assert.Equal(PlanStatus.Optimal, coalPlan.Status);
+        Assert.True(coalPlan.Supplies.ContainsKey("Coal"), "with oil penalized steel should source coal");
+        Assert.False(coalPlan.Supplies.ContainsKey("Crude Oil"), "penalized oil should be avoided");
+
+        var preferOil = Build();
+        preferOil.WeightMultipliers["Coal"] = new Rational(50); // coal dear → coal routes out
+        var oilPlan = FactoryPlanner.Plan(TestData.Database, preferOil);
+        Assert.Equal(PlanStatus.Optimal, oilPlan.Status);
+        Assert.True(oilPlan.Supplies.ContainsKey("Crude Oil"), "with coal penalized steel should source oil");
+        Assert.False(oilPlan.Supplies.ContainsKey("Coal"), "penalized coal should be avoided");
+    }
+
+    /// <summary>A neutral budget (multiplier 1 everywhere) is a no-op: identical supplies.</summary>
+    [Fact]
+    public void Neutral_weight_multiplier_changes_nothing()
+    {
+        PlanRequest Build()
+        {
+            var r = new PlanRequest { Bias = PlanBias.Resources, Byproducts = ByproductMode.AllowSink };
+            r.Targets.Add(new PlanTarget("Steel Ingot", new Rational(60)));
+            return r;
+        }
+
+        var plain = FactoryPlanner.Plan(TestData.Database, Build());
+        var withOnes = Build();
+        foreach (var raw in ScarcityWeights.WeightedResources)
+            withOnes.WeightMultipliers[raw] = Rational.One;
+        var neutral = FactoryPlanner.Plan(TestData.Database, withOnes);
+
+        Assert.Equal(PlanStatus.Optimal, neutral.Status);
+        Assert.Equal(plain.Supplies.Count, neutral.Supplies.Count);
+        foreach (var (part, rate) in plain.Supplies)
+            Assert.Equal(rate, neutral.Supplies[part]);
+    }
+
+    /// <summary>
+    /// The tier cap names exactly the recipes above the chosen progression tier, and
+    /// a plan with them disabled uses nothing past the cap — the Auto-Plan "available
+    /// up to tier" lever (e.g. no Blender) maps onto DisabledRecipes.
+    /// </summary>
+    [Fact]
+    public void Tier_cap_excludes_higher_tier_recipes()
+    {
+        var db = TestData.Database;
+
+        var above7 = FactoryPlanner.RecipesAboveTier(db, 7).ToHashSet();
+        Assert.NotEmpty(above7); // phase 8/9 recipes exist to cap
+        Assert.All(above7, name => Assert.True(db.RecipesByName[name].Tier.Phase > 7));
+        Assert.Contains(db.Document.Recipes, r => r.Tier.Phase <= 7 && !above7.Contains(r.Name));
+
+        var request = new PlanRequest { Bias = PlanBias.Resources, Byproducts = ByproductMode.AllowSink };
+        request.Targets.Add(new PlanTarget("Fuel", new Rational(120)));
+        foreach (var name in above7) request.DisabledRecipes.Add(name);
+
+        var plan = FactoryPlanner.Plan(db, request);
+        Assert.Equal(PlanStatus.Optimal, plan.Status);
+        Assert.All(plan.Recipes, r => Assert.True(db.RecipesByName[r.Recipe].Tier.Phase <= 7,
+            $"{r.Recipe} is tier {db.RecipesByName[r.Recipe].Tier} > cap"));
+    }
+
     [Fact]
     public void Power_bias_prefers_cheaper_energy_plans()
     {

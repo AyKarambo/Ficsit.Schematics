@@ -29,6 +29,13 @@ public static class ScarcityWeights
         ["Uranium"] = new Rational(2100),
     };
 
+    /// <summary>
+    /// The extractable raws the scarcity objective weighs, in canonical (scarcity)
+    /// order. Water is deliberately excluded — it is effectively free and so is not
+    /// part of the user's preference budget.
+    /// </summary>
+    public static IReadOnlyList<string> WeightedResources { get; } = [.. ClassicTotals.Keys];
+
     /// <summary>Effectively free inputs.</summary>
     private static readonly Rational WaterWeight = new(1, 1000);
 

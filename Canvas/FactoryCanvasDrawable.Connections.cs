@@ -35,7 +35,7 @@ public sealed partial class FactoryCanvasDrawable
             ? toLayout.PortAnchor(toPort)
             : new PointF(toLayout.Bounds.Left, toLayout.Bounds.Center.Y);
 
-        canvas.StrokeColor = Theme.Wire;
+        canvas.StrokeColor = state.Settings.WireColorByPart ? PartPalette.ColorFor(connection.Part) : Theme.Wire;
         canvas.StrokeSize = 2f;
 
         var path = new PathF();

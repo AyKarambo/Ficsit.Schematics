@@ -459,6 +459,14 @@
                         <Label x:Name="PathStyleLabel" Style="{StaticResource RowLabel}" />
                         <Picker x:Name="PathStylePicker" Grid.Column="1" WidthRequest="130" SelectedIndexChanged="OnPathStyleChanged" />
                     </Grid>
+                    <Grid ColumnDefinitions="*,Auto">
+                        <Label x:Name="ColorWiresLabel" Style="{StaticResource RowLabel}" FontSize="11.5" />
+                        <Switch x:Name="ColorWiresSwitch" Grid.Column="1" Toggled="OnColorWiresToggled" />
+                    </Grid>
+                    <Grid ColumnDefinitions="*,Auto">
+                        <Label x:Name="FocusHighlightLabel" Style="{StaticResource RowLabel}" FontSize="11.5" />
+                        <Switch x:Name="FocusHighlightSwitch" Grid.Column="1" Toggled="OnFocusHighlightToggled" />
+                    </Grid>
 
                     <Label x:Name="SettingsPlannerHeader" Style="{StaticResource SectionHeader}" />
                     <Grid ColumnDefinitions="*,Auto">
@@ -563,9 +571,27 @@
                         <Label x:Name="PlanBiasLabel" Style="{StaticResource RowLabel}" />
                         <Picker x:Name="PlanBiasPicker" Grid.Column="1" WidthRequest="150" />
                     </Grid>
+
+                    <Button x:Name="PlanPreferenceToggle" Style="{StaticResource TextButton}" FontSize="12"
+                            HorizontalOptions="Start" Clicked="OnPlanPreferenceToggle" />
+                    <VerticalStackLayout x:Name="PlanPreferenceBody" Spacing="6" IsVisible="False">
+                        <Label x:Name="PlanPreferenceHint" Style="{StaticResource MutedLabel}" FontSize="11" LineBreakMode="WordWrap" />
+                        <Grid x:Name="PlanPreferenceBar" HeightRequest="10" ColumnSpacing="0" />
+                        <VerticalStackLayout x:Name="PlanPreferenceList" Spacing="4" />
+                        <FlexLayout Wrap="Wrap" Direction="Row" AlignItems="Center">
+                            <Button x:Name="PlanPrefEqualButton" Style="{StaticResource TextButton}" FontSize="11" Margin="0,0,10,0" Clicked="OnPlanPrefEqual" />
+                            <Button x:Name="PlanPrefResetButton" Style="{StaticResource TextButton}" FontSize="11" Margin="0,0,10,0" Clicked="OnPlanPrefReset" />
+                            <Button x:Name="PlanPrefSaveButton" Style="{StaticResource TextButton}" FontSize="11" Clicked="OnPlanPrefSave" />
+                        </FlexLayout>
+                    </VerticalStackLayout>
+
                     <Grid ColumnDefinitions="*,Auto" ColumnSpacing="6">
                         <Label x:Name="PlanByproductLabel" Style="{StaticResource RowLabel}" />
                         <Picker x:Name="PlanByproductPicker" Grid.Column="1" WidthRequest="150" />
+                    </Grid>
+                    <Grid ColumnDefinitions="*,Auto" ColumnSpacing="6">
+                        <Label x:Name="PlanMaxTierLabel" Style="{StaticResource RowLabel}" />
+                        <Picker x:Name="PlanMaxTierPicker" Grid.Column="1" WidthRequest="150" SelectedIndexChanged="OnPlanMaxTierChanged" />
                     </Grid>
                     <Grid ColumnDefinitions="*,Auto">
                         <Label x:Name="PlanExcludeManualLabel" Style="{StaticResource RowLabel}" FontSize="11.5" />
@@ -575,6 +601,14 @@
                         <Label x:Name="PlanOreConversionLabel" Style="{StaticResource RowLabel}" FontSize="11.5" />
                         <Switch x:Name="PlanOreConversionSwitch" Grid.Column="1" Toggled="OnPlanOreConversionToggled" />
                     </Grid>
+                    <Grid ColumnDefinitions="*,Auto">
+                        <Label x:Name="PlanAutoApplyLabel" Style="{StaticResource RowLabel}" FontSize="11.5" />
+                        <Switch x:Name="PlanAutoApplySwitch" Grid.Column="1" Toggled="OnPlanAutoApplyToggled" />
+                    </Grid>
+                    <Grid ColumnDefinitions="*,Auto">
+                        <Label x:Name="PlanAutoCollapseLabel" Style="{StaticResource RowLabel}" FontSize="11.5" />
+                        <Switch x:Name="PlanAutoCollapseSwitch" Grid.Column="1" Toggled="OnPlanAutoCollapseToggled" />
+                    </Grid>
                     <Button x:Name="PlanRecipesButton" Style="{StaticResource TextButton}" FontSize="12"
                             HorizontalOptions="Start" Clicked="OnPlanRecipesClicked" />
 
@@ -582,6 +616,44 @@
                     <Label x:Name="PlanSummaryLabel" Style="{StaticResource MutedLabel}" LineBreakMode="WordWrap" />
                 </VerticalStackLayout>
             </ScrollView>
+        </Border>
+
+        <!-- draft review: the plan is held here until the user applies it -->
+        <Border x:Name="DraftPanel" Style="{StaticResource Panel}" IsVisible="False"
+                HorizontalOptions="End" VerticalOptions="Start" Margin="12,60,12,12" WidthRequest="380">
+            <ScrollView MaximumHeightRequest="640">
+                <VerticalStackLayout Spacing="6" Padding="0,0,14,0">
+                    <Grid ColumnDefinitions="*,Auto" ColumnSpacing="6">
+                        <Label x:Name="DraftTitle" Style="{StaticResource PanelTitle}" />
+                        <Label x:Name="DraftBadge" Grid.Column="1" FontSize="10.5" FontFamily="OpenSansSemibold" VerticalOptions="Center" />
+                    </Grid>
+                    <Label x:Name="DraftSubtitle" Style="{StaticResource MutedLabel}" LineBreakMode="WordWrap" />
+                    <Label x:Name="DraftStatsLabel" Style="{StaticResource RowLabel}" FontSize="13" Margin="0,4,0,0" />
+                    <Label x:Name="DraftInputsHeader" Style="{StaticResource SectionHeader}" />
+                    <VerticalStackLayout x:Name="DraftInputsList" Spacing="2" />
+                    <Label x:Name="DraftRecipesHeader" Style="{StaticResource SectionHeader}" />
+                    <VerticalStackLayout x:Name="DraftRecipesList" Spacing="2" />
+                    <Label x:Name="DraftByproductsLabel" Style="{StaticResource MutedLabel}" LineBreakMode="WordWrap" Margin="0,6,0,0" />
+                    <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8" Margin="0,8,0,0">
+                        <Button x:Name="DraftApplyButton" Style="{StaticResource AccentButton}" Clicked="OnDraftApply" />
+                        <Button x:Name="DraftDiscardButton" Grid.Column="1" Style="{StaticResource TextButton}" Clicked="OnDraftDiscard" />
+                    </Grid>
+                </VerticalStackLayout>
+            </ScrollView>
+        </Border>
+
+        <!-- background planning status: busy chip (while solving) and ready chip (draft waiting) -->
+        <Border x:Name="PlanBusyChip" Style="{StaticResource Pill}" IsVisible="False"
+                HorizontalOptions="Center" VerticalOptions="End" Margin="0,0,0,20" Padding="14,8">
+            <Grid ColumnDefinitions="Auto,Auto,Auto" ColumnSpacing="10">
+                <ActivityIndicator x:Name="PlanBusySpinner" Color="{StaticResource Accent}" WidthRequest="16" HeightRequest="16" VerticalOptions="Center" />
+                <Label x:Name="PlanBusyLabel" Grid.Column="1" Style="{StaticResource RowLabel}" VerticalOptions="Center" />
+                <Button x:Name="PlanBusyCancel" Grid.Column="2" Style="{StaticResource TextButton}" FontSize="12" HeightRequest="26" Padding="8,0" Clicked="OnPlanCancel" />
+            </Grid>
+        </Border>
+        <Border x:Name="PlanReadyChip" Style="{StaticResource Pill}" IsVisible="False"
+                HorizontalOptions="Center" VerticalOptions="End" Margin="0,0,0,20" Padding="4">
+            <Button x:Name="PlanReadyButton" Style="{StaticResource TextButton}" FontSize="12.5" Clicked="OnPlanReadyReview" />
         </Border>
 
         <!-- part picker for the auto-plan rows -->
@@ -644,6 +716,15 @@
                 HorizontalOptions="Start" VerticalOptions="Start" Padding="4">
             <Button x:Name="PortMenuClear" Text="Clear connections" FontSize="12"
                     HeightRequest="30" Padding="12,0" Clicked="OnPortMenuClear" />
+        </Border>
+        <Border x:Name="SelectionMenu" Style="{StaticResource Panel}" IsVisible="False"
+                HorizontalOptions="Start" VerticalOptions="Start" Padding="4">
+            <VerticalStackLayout Spacing="2">
+                <Button x:Name="SelectionMenuFormat" Text="Format selection" FontSize="12"
+                        HeightRequest="30" Padding="12,0" Clicked="OnSelectionMenuFormat" />
+                <Button x:Name="SelectionMenuGroup" Text="Group into outpost" FontSize="12"
+                        HeightRequest="30" Padding="12,0" Clicked="OnSelectionMenuGroup" />
+            </VerticalStackLayout>
         </Border>
     </Grid>
 </ContentPage>

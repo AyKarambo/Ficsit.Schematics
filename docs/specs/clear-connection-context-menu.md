@@ -1,5 +1,7 @@
 # Right-click a port → "Clear connection" (#13)
 
+> **Status: ✅ Implemented.**
+
 ## Problem
 
 There is no port-level context menu. Right-click is routed through the controller

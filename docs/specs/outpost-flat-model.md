@@ -1,5 +1,7 @@
 # Outposts as flat groups ("bracket"), matching the reference (#16)
 
+> **Status: 🚧 In progress — active rework on branch `outpost-flat-model`. The flat `Parent` model has landed; removal of the `NodeKind.Import`/`Export` + `EnsureBoundary` mechanism is still pending.**
+
 Supersedes the nested/boundary-node approach in [outpost-linking.md](outpost-linking.md). Goal
 (user, 2026-06-14): an outpost is **a completely normal factory, just with a bracket for
 overview** — exactly like the reference app *Satisfactory Modeler*.

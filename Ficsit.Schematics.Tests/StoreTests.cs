@@ -55,16 +55,23 @@ public class StoreTests : IDisposable
         using var store = new FicsitStore(_path);
         var settings = store.LoadSettings();
         Assert.True(settings.DarkMode);
+        // Readability defaults are on.
+        Assert.True(settings.WireColorByPart);
+        Assert.True(settings.FocusHighlight);
 
         settings.DarkMode = false;
         settings.UiScale = 16;
         settings.Numbers["value"].DecimalPlaces = 3;
+        settings.WireColorByPart = false;
+        settings.FocusHighlight = false;
         store.SaveSettings(settings);
 
         var reloaded = store.LoadSettings();
         Assert.False(reloaded.DarkMode);
         Assert.Equal(16, reloaded.UiScale);
         Assert.Equal(3, reloaded.Numbers["value"].DecimalPlaces);
+        Assert.False(reloaded.WireColorByPart);
+        Assert.False(reloaded.FocusHighlight);
     }
 
     [Fact]
@@ -76,11 +83,20 @@ public class StoreTests : IDisposable
         Assert.True(settings.PlannerExcludeManualParts);
         Assert.False(settings.PlannerAllowOreConversion);
         Assert.Empty(settings.PlannerDisabledRecipes);
+        Assert.Empty(settings.PlannerResourcePreferences);
+        Assert.Equal(99, settings.PlannerMaxTierPhase);
+        Assert.False(settings.PlannerAutoApply);
+        Assert.True(settings.PlannerAutoCollapse);
 
         settings.PlannerExcludeManualParts = false;
         settings.PlannerAllowOreConversion = true;
         settings.PlannerDisabledRecipes.Add("Pure Iron Ingot");
         settings.PlannerDisabledRecipes.Add("Solid Steel Ingot");
+        settings.PlannerResourcePreferences["Iron Ore"] = 40;
+        settings.PlannerResourcePreferences["Crude Oil"] = 5;
+        settings.PlannerMaxTierPhase = 7;
+        settings.PlannerAutoApply = true;
+        settings.PlannerAutoCollapse = false;
         store.SaveSettings(settings);
 
         var reloaded = store.LoadSettings();
@@ -89,6 +105,11 @@ public class StoreTests : IDisposable
         Assert.Equal(2, reloaded.PlannerDisabledRecipes.Count);
         Assert.Contains("Pure Iron Ingot", reloaded.PlannerDisabledRecipes);
         Assert.Contains("Solid Steel Ingot", reloaded.PlannerDisabledRecipes);
+        Assert.Equal(40, reloaded.PlannerResourcePreferences["Iron Ore"]);
+        Assert.Equal(5, reloaded.PlannerResourcePreferences["Crude Oil"]);
+        Assert.Equal(7, reloaded.PlannerMaxTierPhase);
+        Assert.True(reloaded.PlannerAutoApply);
+        Assert.False(reloaded.PlannerAutoCollapse);
     }
 
     public void Dispose()

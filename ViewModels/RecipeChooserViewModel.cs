@@ -100,11 +100,15 @@ public sealed partial class RecipeChooserViewModel : ObservableObject
             }
             if (!Matches(recipe, query)) continue;
             var iconPart = recipe.Outputs.FirstOrDefault()?.Part ?? recipe.Parts.FirstOrDefault()?.Part;
+            // OfType drops parts with no icon, keeping the list non-null (the binding
+            // target is IReadOnlyList<ImageSource>); a missing icon would render blank anyway.
             var outputIcons = recipe.Outputs
                 .Select(p => _icons.GetSource(p.Part))
+                .OfType<ImageSource>()
                 .ToList();
             var inputIcons = recipe.Inputs
                 .Select(p => _icons.GetSource(p.Part))
+                .OfType<ImageSource>()
                 .ToList();
             Recipes.Add(new RecipeListItem
             {

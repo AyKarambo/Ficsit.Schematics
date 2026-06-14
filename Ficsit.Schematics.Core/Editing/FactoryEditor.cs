@@ -83,10 +83,45 @@ public sealed class FactoryEditor
         DocumentReplaced?.Invoke();
     }
 
+    private bool _solveSuspended;
+    private bool _solvePending;
+
     public void Resolve()
     {
+        if (_solveSuspended) { _solvePending = true; return; }
         Result = SolverFactory.Create(Document.Solver, _data).Solve(Document);
         Solved?.Invoke();
+    }
+
+    /// <summary>
+    /// Suspend re-solving for a bulk edit, then solve once when the returned scope is
+    /// disposed. Each <see cref="AddNode"/>/<see cref="Connect"/>/<see cref="SetLimit"/>
+    /// otherwise drives a full graph solve (<see cref="CommandStack.Changed"/> →
+    /// <see cref="Resolve"/>), so materializing a large plan would fire hundreds of
+    /// solves and freeze the UI. Wrap the batch in <c>using editor.SuspendSolve();</c>.
+    /// </summary>
+    public IDisposable SuspendSolve()
+    {
+        _solveSuspended = true;
+        return new SolveScope(this);
+    }
+
+    private void ResumeSolve()
+    {
+        if (!_solveSuspended) return;
+        _solveSuspended = false;
+        if (_solvePending) { _solvePending = false; Resolve(); }
+    }
+
+    private sealed class SolveScope(FactoryEditor editor) : IDisposable
+    {
+        private bool _disposed;
+        public void Dispose()
+        {
+            if (_disposed) return;
+            _disposed = true;
+            editor.ResumeSolve();
+        }
     }
 
     // ------------------------------------------------------------------- edits
@@ -181,6 +216,52 @@ public sealed class FactoryEditor
                 graph.Connections.AddRange(affectedConnections);
             },
         });
+    }
+
+    /// <summary>
+    /// Collapse <paramref name="nodes"/> (members of the current scope) into a new
+    /// outpost, as one undoable step. Reparenting only — the flat solver keeps every
+    /// real connection, so flows are unchanged and the machines simply render inside
+    /// the outpost box. Boundary handles are left out of the group. Returns the new
+    /// outpost, or null if nothing groupable was passed.
+    /// </summary>
+    public FactoryNode? GroupIntoOutpost(IReadOnlyList<FactoryNode> nodes, string? title)
+    {
+        var graph = Document.Root;
+        var members = nodes
+            .Where(n => n.Parent == ActiveOutpost
+                && n.Kind is not (NodeKind.Import or NodeKind.Export)
+                && graph.Nodes.Contains(n))
+            .Distinct()
+            .ToList();
+        if (members.Count == 0) return null;
+
+        var outpost = new FactoryNode
+        {
+            Kind = NodeKind.Outpost,
+            Name = "Outpost",
+            Title = title,
+            Parent = ActiveOutpost,
+            X = members.Min(n => n.X),
+            Y = members.Min(n => n.Y),
+        };
+        var oldParents = members.ToDictionary(n => n, n => n.Parent);
+
+        Commands.Push(new EditCommand
+        {
+            Label = string.IsNullOrEmpty(title) ? "Group into outpost" : $"Group {title}",
+            Apply = () =>
+            {
+                if (!graph.Nodes.Contains(outpost)) graph.Nodes.Add(outpost);
+                foreach (var n in members) n.Parent = outpost;
+            },
+            Revert = () =>
+            {
+                foreach (var n in members) n.Parent = oldParents[n];
+                graph.RemoveNode(outpost);
+            },
+        });
+        return outpost;
     }
 
     public void MoveNodes(IReadOnlyList<FactoryNode> nodes, double deltaX, double deltaY, bool coalesce = true)

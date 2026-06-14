@@ -72,6 +72,7 @@ public partial class MainPage : ContentPage
         _controller.OpenChooserForPort += ShowChooserForPort;
         _controller.OpenMachinePopup += ShowMachinePopup;
         _controller.OpenPortMenu += ShowPortMenu;
+        _controller.OpenSelectionMenu += ShowSelectionMenu;
         _controller.EnterOutpostRequested += node => _state.Editor.EnterOutpost(node);
         _controller.EditLimitRequested += ShowLimitEditor;
         _controller.CloseTransientOverlays += CloseTransientOverlays;
@@ -168,6 +169,8 @@ public partial class MainPage : ContentPage
         DragSensitivityEntry.Text = _state.Settings.DragSensitivity.ToString();
         AutosaveSwitch.IsToggled = _state.Settings.Autosave;
         AutosaveIntervalEntry.Text = _state.Settings.AutosaveIntervalMinutes.ToString();
+        ColorWiresSwitch.IsToggled = _state.Settings.WireColorByPart;
+        FocusHighlightSwitch.IsToggled = _state.Settings.FocusHighlight;
 
         _initializing = wasInitializing;
         ApplyPlannerToggleControls();
@@ -223,6 +226,8 @@ public partial class MainPage : ContentPage
         CalculatorLabel.Text = _loc.L("CALCULATOR");
         SettingsStyleHeader.Text = _loc.L("STYLE").ToUpperInvariant();
         PathStyleLabel.Text = _loc.L("CONNECTION_STYLE");
+        ColorWiresLabel.Text = "Colour wires by part";
+        FocusHighlightLabel.Text = "Focus highlight on hover";
         SettingsMultipliersHeader.Text = _loc.L("CALCULATOR").ToUpperInvariant();
         SpaceElevatorMultLabel.Text = _loc.L("SPACE_ELEVATOR_MULTIPLIER");
         InputMultLabel.Text = _loc.L("INPUT_MULTIPLIER");
@@ -416,12 +421,15 @@ public partial class MainPage : ContentPage
         SettingsPanel.IsVisible = false;
         SavesPanel.IsVisible = false;
         AutoPlanPanel.IsVisible = false;
+        DraftPanel.IsVisible = false;
         PartPickerPanel.IsVisible = false;
         RecipeListPanel.IsVisible = false;
         PortMenu.IsVisible = false;
+        SelectionMenu.IsVisible = false;
         CommitLimitEditor();
         _popupNode = null;
         _pendingPortConnect = null;
+        RefreshDraftChip();
     }
 
     /// <summary>
@@ -438,6 +446,7 @@ public partial class MainPage : ContentPage
         PartPickerPanel.IsVisible = false;
         RecipeListPanel.IsVisible = false;
         PortMenu.IsVisible = false;
+        SelectionMenu.IsVisible = false;
         CommitLimitEditor();
         _pendingPortConnect = null;
     }

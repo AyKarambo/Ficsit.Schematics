@@ -1,3 +1,5 @@
+using Ficsit.Schematics.Core.Numerics;
+
 namespace Ficsit.Schematics.Core.Planning;
 
 /// <summary>Everything the auto-planner needs to synthesize a factory.</summary>
@@ -28,4 +30,13 @@ public sealed class PlanRequest
     /// request is built — the planner itself learns no new concepts.
     /// </summary>
     public HashSet<string> DisabledRecipes { get; } = [];
+
+    /// <summary>
+    /// Per-resource cost-weight multipliers for the <see cref="PlanBias.Resources"/>
+    /// objective. 1 (or absent) leaves the scarcity default untouched; &lt;1 makes a
+    /// raw cheaper so the plan reaches for it, &gt;1 makes it dearer so it is spared.
+    /// The Auto-Plan "resource preference" budget produces these — the planner just
+    /// multiplies the baseline weight, so it learns no new concept.
+    /// </summary>
+    public Dictionary<string, Rational> WeightMultipliers { get; } = [];
 }

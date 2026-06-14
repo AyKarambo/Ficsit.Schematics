@@ -1,5 +1,7 @@
 # Canvas pan performance (#11)
 
+> **Status: ✅ Implemented.**
+
 ## Problem
 
 Panning the whole canvas is laggy. Pan/zoom are applied as a single immediate-mode

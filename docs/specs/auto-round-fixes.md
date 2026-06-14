@@ -1,5 +1,7 @@
 # Auto-Round fixes: limit-pinned stepper + clock stepper when off (#15)
 
+> **Status: ✅ Implemented.**
+
 Follow-up to [auto-round.md](auto-round.md) (#1), which shipped the feature. Two defects
 remain.
 

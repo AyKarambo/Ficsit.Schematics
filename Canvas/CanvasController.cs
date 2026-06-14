@@ -40,6 +40,7 @@ public sealed partial class CanvasController(AppState state, FactoryCanvasDrawab
     public event Action<PortDragContext, PointF>? OpenChooserForPort;
     public event Action<FactoryNode, PointF>? OpenMachinePopup;
     public event Action<FactoryNode, PortInfo, PointF>? OpenPortMenu;
+    public event Action<IReadOnlyList<FactoryNode>, PointF>? OpenSelectionMenu; // right-click on a multi-selection
     public event Action<FactoryNode>? EnterOutpostRequested;
     public event Action<FactoryNode, NodeLayout>? EditLimitRequested;
     public event Action? Invalidate;
@@ -257,6 +258,13 @@ public sealed partial class CanvasController(AppState state, FactoryCanvasDrawab
             if (node is not null && rightPort is not null && PortHasConnections(node, rightPort))
             {
                 OpenPortMenu?.Invoke(node, rightPort, screen);
+                return;
+            }
+            // Right-clicking a node that's part of a multi-selection offers group
+            // actions ("Format selection"); a single node falls through to its editor.
+            if (node is not null && state.Selection.Count >= 2 && state.Selection.Contains(node))
+            {
+                OpenSelectionMenu?.Invoke(state.Selection.ToList(), screen);
                 return;
             }
             if (node is not null)
