@@ -99,33 +99,3 @@ public abstract class MachineModule
         string? overclockExp = null, CostEntry[]? cost = null)
         => Def(name, tier, power, null, null, null, null, overclockExp, 0, null, null, cost);
 }
-
-/// <summary>
-/// One machine, or a family of machines, plus the optional multi-machine family that
-/// describes its marks/capacities. <see cref="MachineModule"/>'s builders produce these.
-/// </summary>
-public sealed record MachineGroup(
-    IReadOnlyList<(int Sort, MachineDefinition Definition)> Machines,
-    int FamilySort = -1,
-    MultiMachineDefinition? Family = null)
-{
-    /// <summary>Attach a capacity-only family (purity / belt mark / upload rate + node
-    /// defaults) to a single standalone machine; the family is keyed by the machine's name.</summary>
-    public MachineGroup WithFamily(int familySort, bool showPpm = false, bool autoRound = true,
-        string defaultMax = "", MultiMachineCapacity[]? capacities = null)
-        => this with
-        {
-            FamilySort = familySort,
-            Family = new MultiMachineDefinition
-            {
-                Name = Machines[0].Definition.Name,
-                ShowPpm = showPpm,
-                AutoRound = autoRound,
-                DefaultMax = defaultMax,
-                Capacities = (capacities ?? []).ToList(),
-            },
-        };
-}
-
-/// <summary>A machine mark within a multi-mark family: the machine it builds plus its variant entry.</summary>
-public sealed record MarkSpec(int Sort, MachineDefinition Machine, MultiMachineVariant Variant);

@@ -2,28 +2,6 @@ using Ficsit.Schematics.Core.Numerics;
 
 namespace Ficsit.Schematics.Core.Planning;
 
-// Result and warm-start types shared by the exact-rational LP solvers
-// (RationalSimplex, RevisedSimplexSolver).
-
-/// <summary>Outcome of an exact-rational LP solve.</summary>
-public sealed class SimplexSolution
-{
-    public required PlanStatus Status { get; init; }
-    public Rational[] Values { get; init; } = [];
-    public Rational Objective { get; init; } = Rational.Zero;
-}
-
-/// <summary>Outcome of a revised-simplex solve, including the warm-start snapshot.</summary>
-public sealed class RevisedSolveResult
-{
-    public required PlanStatus Status { get; init; }
-    public Rational[] Values { get; init; } = [];
-    public Rational Objective { get; init; } = Rational.Zero;
-
-    /// <summary>Optimal basis for warm-starting follow-up solves (Optimal only).</summary>
-    public RevisedBasisSnapshot? Snapshot { get; init; }
-}
-
 /// <summary>
 /// Optimal-basis checkpoint of a revised-simplex solve, used to warm-start a
 /// follow-up solve (same constraints, new objective and/or one pinned row)
