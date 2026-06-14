@@ -1,6 +1,6 @@
 namespace Ficsit.Schematics.Core.GameData;
 
-/// <summary>Root shape of game_data.json (reference-app compatible).</summary>
+/// <summary>The assembled game data: machines, multi-machine families, parts and recipes.</summary>
 public sealed class GameDataDocument
 {
     public List<MachineDefinition> Machines { get; set; } = [];

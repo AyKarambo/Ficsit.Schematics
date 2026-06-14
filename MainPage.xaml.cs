@@ -43,7 +43,8 @@ public partial class MainPage : ContentPage
         [StorageMode.PartiallyFull, StorageMode.Full, StorageMode.Empty, StorageMode.InputEqualsOutput];
 
     public MainPage(AppState state, IconStore icons, LocalizationService loc,
-        NumberFormatService numbers, RecipeChooserViewModel chooser, SummaryViewModel summary)
+        NumberFormatService numbers, RecipeChooserViewModel chooser, SummaryViewModel summary,
+        FactoryCanvasDrawable drawable, CanvasController controller)
     {
         _state = state;
         _icons = icons;
@@ -55,8 +56,8 @@ public partial class MainPage : ContentPage
         InitializeComponent();
         BindingContext = this;
 
-        _drawable = new FactoryCanvasDrawable(state, icons, numbers);
-        _controller = new CanvasController(state, _drawable);
+        _drawable = drawable;
+        _controller = controller;
         Canvas.Drawable = _drawable;
 
         _controller.Invalidate += () =>

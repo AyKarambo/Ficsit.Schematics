@@ -1,57 +1,35 @@
 namespace Ficsit.Schematics.Core.GameData.Catalog;
 
 /// <summary>
-/// Assembles the game database from the catalog classes in this assembly.
-/// Machines, parts and recipes are plain C# classes (one per file under
-/// Catalog/) found via reflection — there is no runtime data file. Order is
-/// restored from each entry's SortIndex so lists keep the canonical game order.
+/// Assembles the game database from the catalog modules in this assembly.
+/// Machines, parts and recipes are authored as grouped C# tables
+/// (<see cref="MachineModule"/>, <see cref="PartModule"/>, <see cref="RecipeModule"/>)
+/// and discovered via reflection — there is no runtime data file. Each entry's
+/// sort key restores the canonical game order.
 /// </summary>
 public static class GameDataCatalog
 {
     public static GameDataDocument BuildDocument()
     {
-        var machines = Discover<MachineBase>().OrderBy(m => m.SortIndex).ToList();
+        var machineModules = Discover<MachineModule>().ToList();
 
         var document = new GameDataDocument();
-        // ToIndexedMachineDefinitions() yields (sortKey, def) pairs — one per standalone
-        // machine, or one per variant for merged family classes (each with its original
-        // SortIndex so Miner Mk.1/2/3 are interleaved at their canonical positions).
-        document.Machines.AddRange(
-            machines.SelectMany(m => m.ToIndexedMachineDefinitions())
-                    .OrderBy(x => x.SortIndex)
-                    .Select(x => x.Definition));
-        // Family definitions come from merged-machine classes that override
-        // ToFamilyDefinition().  Sorted by FamilySortIndex (canonical multi-machine order).
-        document.MultiMachines.AddRange(
-            machines
-                .Select(m => (FamilySortIndex: GetFamilySortIndex(m), Def: m.ToFamilyDefinition()))
-                .Where(x => x.Def is not null)
-                .OrderBy(x => x.FamilySortIndex)
-                .Select(x => x.Def!));
-        document.Parts.AddRange(Discover<PartBase>()
-            .OrderBy(p => p.SortIndex).Select(p => p.ToDefinition()));
-        document.Recipes.AddRange(Discover<RecipeBase>()
-            .OrderBy(r => r.SortIndex).Select(r => r.ToDefinition()));
+        document.Machines.AddRange(Ordered(machineModules.SelectMany(m => m.Machines)));
+        document.MultiMachines.AddRange(Ordered(machineModules.SelectMany(m => m.Families)));
+        document.Parts.AddRange(Ordered(Discover<PartModule>().SelectMany(m => m.Build())));
+        document.Recipes.AddRange(Ordered(Discover<RecipeModule>().SelectMany(m => m.Build())));
         return document;
     }
 
     public static GameDatabase BuildDatabase() => new(BuildDocument());
 
+    /// <summary>Restores canonical game order from the per-entry sort keys.</summary>
+    private static IEnumerable<TDefinition> Ordered<TDefinition>(
+        IEnumerable<(int Sort, TDefinition Definition)> items)
+        => items.OrderBy(item => item.Sort).Select(item => item.Definition);
+
     private static IEnumerable<T> Discover<T>() where T : class
         => typeof(GameDataCatalog).Assembly.GetTypes()
             .Where(type => !type.IsAbstract && typeof(T).IsAssignableFrom(type))
             .Select(type => (T)Activator.CreateInstance(type)!);
-
-    /// <summary>
-    /// Returns the FamilySortIndex for a merged-family machine class, or
-    /// <see cref="int.MaxValue"/> for standalone machines.
-    /// </summary>
-    private static int GetFamilySortIndex(MachineBase m) => m switch
-    {
-        ExtractorBase e => e.FamilySortIndex,
-        GeneratorBase g => g.FamilySortIndex,
-        StorageBase s => s.FamilySortIndex,
-        SpecialBase sp => sp.FamilySortIndex,
-        _ => int.MaxValue,
-    };
 }
