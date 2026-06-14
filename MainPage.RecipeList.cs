@@ -279,19 +279,22 @@ public partial class MainPage
     /// </summary>
     private async Task<string> ApplyUnlockedRecipesFromSaveAsync(string path)
     {
-        var stems = await Task.Run(() => SatisfactorySaveReader.ReadUnlockedAlternateSchematics(path));
-        var (unlocked, unrecognized) = SchematicRecipeMap.Match(Data, stems);
+        var schematics = await Task.Run(() => SatisfactorySaveReader.ReadUnlockedSchematics(path));
+        var (enabled, maxPhase, alternates, unrecognized) = SchematicRecipeMap.DetermineUnlocked(Data, schematics);
 
+        // The save's progression is authoritative: disable every recipe it hasn't unlocked
+        // (standard recipes above the reached tier, and every not-yet-found hard-drive alternate).
         DisabledRecipes.Clear();
         foreach (var recipe in Data.Document.Recipes)
-            if (recipe.Alternate && !unlocked.Contains(recipe.Name))
+            if (!enabled.Contains(recipe.Name))
                 DisabledRecipes.Add(recipe.Name);
         PersistDisabledRecipes();
         SyncRecipeListChecks();
 
-        var message = $"Enabled {unlocked.Count} unlocked alternate recipe(s); standard recipes stay on.";
-        if (unrecognized.Count > 0)
-            message += $" {unrecognized.Count} unlocked schematic(s) couldn't be matched — toggle by hand if needed.";
+        var message = $"Set recipes from the save: {enabled.Count} unlocked "
+            + $"(standard recipes up to Tier {maxPhase}, plus {alternates} alternate recipe(s)).";
+        if (unrecognized > 0)
+            message += $" {unrecognized} alternate schematic(s) couldn't be matched — toggle by hand if needed.";
         return message;
     }
 }

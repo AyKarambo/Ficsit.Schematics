@@ -45,50 +45,71 @@ public static class SatisfactorySaveReader
     public static IReadOnlyList<ResourceNodeInfo> ReadResourceNodes(string filePath)
         => ReadResourceNodes(File.ReadAllBytes(filePath));
 
-    // ------------------------------------------------- unlocked alternates
+    // ------------------------------------------------- unlocked schematics
 
     private const string PurchasedSchematicsProperty = "mPurchasedSchematics";
+    private const string AlternatePrefix = "Alternate_";
+
+    public static IReadOnlyList<string> ReadUnlockedSchematics(string filePath)
+        => ReadUnlockedSchematics(File.ReadAllBytes(filePath));
+
+    /// <summary>
+    /// The stem of every unlocked schematic in the save's <c>mPurchasedSchematics</c> array
+    /// (the part after <c>Schematic_</c>): milestones ("3-2"), the onboarding "StartingRecipes",
+    /// tutorials, MAM research, and hard-drive alternates ("Alternate_BoltedFrame"). Reuses the
+    /// resource-node reader's chunk inflation; the array is scanned by asset path rather than
+    /// parsed by struct offset, which is robust across save versions (see from-save-spike.md).
+    /// </summary>
+    public static IReadOnlyList<string> ReadUnlockedSchematics(byte[] saveFile)
+        => ReadAllSchematicStemsFromBody(DecompressBody(saveFile));
 
     public static IReadOnlyList<string> ReadUnlockedAlternateSchematics(string filePath)
         => ReadUnlockedAlternateSchematics(File.ReadAllBytes(filePath));
 
-    /// <summary>
-    /// The stems of every unlocked <c>Schematic_Alternate_*</c> in the save's
-    /// <c>mPurchasedSchematics</c> array (e.g. "PureIronIngot", "BoltedFrame"). Reuses the
-    /// resource-node reader's chunk inflation; the array region is scanned for the alternate
-    /// asset paths rather than parsed by struct offset, which is robust across save versions
-    /// (see docs/specs/from-save-spike.md).
-    /// </summary>
+    /// <summary>Just the unlocked hard-drive alternates (stem with the "Alternate_" prefix dropped).</summary>
     public static IReadOnlyList<string> ReadUnlockedAlternateSchematics(byte[] saveFile)
-        => ReadAlternateStemsFromBody(DecompressBody(saveFile));
+        => OnlyAlternates(ReadUnlockedSchematics(saveFile));
 
-    /// <summary>Parses alternate stems out of an already-decompressed save body. Public so it
-    /// can be unit-tested against a synthetic body without a real <c>.sav</c> fixture.</summary>
-    public static IReadOnlyList<string> ReadAlternateStemsFromBody(byte[] body)
+    /// <summary>Stem of every <c>Schematic_*</c> entry in the purchased array. Public so it can be
+    /// unit-tested against a synthetic body without a real <c>.sav</c> fixture.</summary>
+    public static IReadOnlyList<string> ReadAllSchematicStemsFromBody(byte[] body)
     {
         var stems = new List<string>();
         var seen = new HashSet<string>(StringComparer.Ordinal);
 
         var marker = Encoding.ASCII.GetBytes(PurchasedSchematicsProperty);
         foreach (var at in FindAll(body, marker))
-            // Walk the array from every occurrence and union the alternates. The real array
-            // yields all of them; an incidental reference elsewhere yields ~nothing (the
-            // walk's gap check stops it quickly). No structural validation — the walk itself
-            // is the filter, so we're robust to FString/FName framing differences.
-            CollectAlternateStems(body, at, stems, seen);
+            // Walk the array from every occurrence and union. The real array yields all of
+            // them; an incidental reference elsewhere yields ~nothing (the walk's gap check
+            // stops it quickly). No structural validation — the walk itself is the filter, so
+            // we're robust to FString/FName framing differences.
+            CollectSchematicStems(body, at, stems, seen);
         return stems;
+    }
+
+    /// <summary>Back-compat: the alternate stems only (used by the alternate-specific tests).</summary>
+    public static IReadOnlyList<string> ReadAlternateStemsFromBody(byte[] body)
+        => OnlyAlternates(ReadAllSchematicStemsFromBody(body));
+
+    private static IReadOnlyList<string> OnlyAlternates(IReadOnlyList<string> schematicStems)
+    {
+        var alternates = new List<string>();
+        foreach (var stem in schematicStems)
+            if (stem.StartsWith(AlternatePrefix, StringComparison.Ordinal))
+                alternates.Add(stem[AlternatePrefix.Length..]);
+        return alternates;
     }
 
     /// <summary>Walks the contiguous purchased-schematics array by each entry's asset path
     /// (every entry starts <c>/Game/FactoryGame/Schematics/</c> — milestones, tutorials, AWESOME
-    /// shop customizers and hard-drive alternates alike), collecting the
-    /// <c>Schematic_Alternate_</c> stems. Walking the path (not the class name) is what keeps
-    /// the scan going across the long runs of non-"Schematic_"-named customizer entries
-    /// interleaved in the array; the first non-schematic <c>/Game</c> ref marks the array end.</summary>
-    private static void CollectAlternateStems(byte[] body, int from, List<string> stems, HashSet<string> seen)
+    /// shop customizers and hard-drive alternates alike), collecting the stem after
+    /// <c>Schematic_</c>. Walking the path (not the class name) is what keeps the scan going
+    /// across the long runs of non-"Schematic_"-named customizer entries interleaved in the
+    /// array; the first non-schematic <c>/Game</c> ref marks the array end.</summary>
+    private static void CollectSchematicStems(byte[] body, int from, List<string> stems, HashSet<string> seen)
     {
         const string schematicsRoot = "/Game/FactoryGame/Schematics/";
-        const string alt = "Schematic_Alternate_";
+        const string schematic = "Schematic_";
         var token = Encoding.ASCII.GetBytes("/Game/");
         var hardEnd = Math.Min(body.Length, from + 4 * 1024 * 1024);
         var pos = from;
@@ -108,9 +129,9 @@ public static class SatisfactorySaveReader
             if (!path.StartsWith(schematicsRoot, StringComparison.Ordinal)) break;
             lastHit = idx;
 
-            var a = path.IndexOf(alt, StringComparison.Ordinal);
-            if (a < 0) continue;
-            var stemStart = a + alt.Length;
+            var s = path.IndexOf(schematic, StringComparison.Ordinal);
+            if (s < 0) continue; // AWESOME-shop customizer (CBG_*) etc. — not a recipe unlock
+            var stemStart = s + schematic.Length;
             var dot = path.IndexOf('.', stemStart);
             var stem = (dot >= 0 ? path[stemStart..dot] : path[stemStart..]);
             if (stem.EndsWith("_C", StringComparison.Ordinal)) stem = stem[..^2];

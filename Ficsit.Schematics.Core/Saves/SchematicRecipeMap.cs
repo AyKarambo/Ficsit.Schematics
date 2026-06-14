@@ -73,6 +73,52 @@ public static class SchematicRecipeMap
         ["RadioControlUnit1"] = "Radio Connection Unit",
     };
 
+    /// <summary>The recipes a save has unlocked, derived from all its purchased schematics:
+    /// standard recipes are gated by the highest reached progression phase (milestone
+    /// schematics "P-M"); alternate recipes are gated by their specific hard-drive schematic.
+    /// MAM-unlocked recipes don't map to a milestone, so the phase gate keeps them on within
+    /// the reached phase rather than wrongly disabling them.</summary>
+    public static (HashSet<string> EnabledRecipes, int MaxPhase, int UnlockedAlternates, int UnrecognizedAlternates)
+        DetermineUnlocked(GameDatabase data, IEnumerable<string> schematicStems)
+    {
+        var maxPhase = 0;
+        var alternateStems = new List<string>();
+        foreach (var stem in schematicStems)
+        {
+            if (stem.StartsWith("Alternate_", StringComparison.Ordinal))
+                alternateStems.Add(stem["Alternate_".Length..]);
+            else if (TryParseMilestonePhase(stem, out var phase))
+                maxPhase = Math.Max(maxPhase, phase);
+        }
+
+        var (unlockedAlternates, unrecognized) = Match(data, alternateStems);
+
+        var enabled = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var recipe in data.Document.Recipes)
+        {
+            if (recipe.Alternate)
+            {
+                if (unlockedAlternates.Contains(recipe.Name)) enabled.Add(recipe.Name);
+            }
+            else if (recipe.Tier.Phase <= maxPhase)
+            {
+                enabled.Add(recipe.Name);
+            }
+        }
+        return (enabled, maxPhase, unlockedAlternates.Count, unrecognized.Count);
+    }
+
+    /// <summary>True for a milestone schematic stem like "3-2" (all digits around one dash).</summary>
+    private static bool TryParseMilestonePhase(string stem, out int phase)
+    {
+        phase = 0;
+        var dash = stem.IndexOf('-');
+        if (dash <= 0 || dash == stem.Length - 1) return false;
+        for (var i = 0; i < stem.Length; i++)
+            if (i != dash && !char.IsAsciiDigit(stem[i])) return false;
+        return int.TryParse(stem.AsSpan(0, dash), out phase);
+    }
+
     /// <summary>The unlocked alternate recipe names and any stems that couldn't be matched.</summary>
     public static (HashSet<string> Unlocked, List<string> Unrecognized) Match(
         GameDatabase data, IEnumerable<string> stems)

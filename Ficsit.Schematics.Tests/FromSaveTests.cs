@@ -69,6 +69,28 @@ public class FromSaveTests
     }
 
     [Fact]
+    public void Determine_unlocked_gates_standard_by_phase_and_alternates_by_hard_drive()
+    {
+        var data = TestData.Database;
+        // Reached milestone 3-2; one hard-drive alternate (Bolted Frame) unlocked.
+        var stems = new List<string> { "StartingRecipes", "1-1", "2-1", "3-2", "Alternate_BoltedFrame" };
+
+        var (enabled, maxPhase, alternates, _) = SchematicRecipeMap.DetermineUnlocked(data, stems);
+
+        Assert.Equal(3, maxPhase);
+        Assert.Equal(1, alternates);
+
+        // Standard recipes follow the reached phase exactly.
+        foreach (var recipe in data.Document.Recipes.Where(r => !r.Alternate))
+            Assert.Equal(recipe.Tier.Phase <= 3, enabled.Contains(recipe.Name));
+
+        // Alternates: only the unlocked one is on.
+        Assert.Contains("Bolted Frame", enabled);
+        var lockedAlternate = data.Document.Recipes.First(r => r.Alternate && r.Name != "Bolted Frame").Name;
+        Assert.DoesNotContain(lockedAlternate, enabled);
+    }
+
+    [Fact]
     public void Matches_most_alternates_by_token_set()
     {
         var data = TestData.Database;
