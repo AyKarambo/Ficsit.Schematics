@@ -270,6 +270,30 @@ public class SolverTests
     }
 
     [Fact]
+    public void Export_with_no_external_consumer_still_shows_interior_production()
+    {
+        // miner → Import → smelter → Export, with nothing wired to the export's outside. A
+        // dangling export acts as an open sink, so production still flows (it must not zero the
+        // whole chain back to the miner) and both boundary handles report their real rate.
+        var doc = new FactoryDocument();
+        var miner = Node(doc, "Iron Ore", "60");
+        var outpost = Node(doc, "Outpost");
+        var import = new FactoryNode { Name = "Iron Ore", Kind = NodeKind.Import, Parent = outpost };
+        var smelter = new FactoryNode { Name = "Iron Ingot", Kind = NodeKind.Recipe, Parent = outpost };
+        var export = new FactoryNode { Name = "Iron Ingot", Kind = NodeKind.Export, Parent = outpost };
+        doc.Root.Nodes.Add(import);
+        doc.Root.Nodes.Add(smelter);
+        doc.Root.Nodes.Add(export);
+        Connect(doc, miner, "Iron Ore", import);
+        Connect(doc, import, "Iron Ore", smelter);
+        Connect(doc, smelter, "Iron Ingot", export);
+
+        var result = Solve(doc);
+        Assert.Equal(new Rational(60), result.For(import).DisplayValue); // 60 ore still pulled in
+        Assert.Equal(new Rational(60), result.For(export).DisplayValue); // 60 ingot crosses out
+    }
+
+    [Fact]
     public void Power_is_negative_for_consumers()
     {
         var doc = new FactoryDocument();

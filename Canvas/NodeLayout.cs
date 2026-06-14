@@ -207,12 +207,22 @@ public sealed class NodeLayout
         return result;
     }
 
-    /// <summary>Distinct parts crossing an outpost's boundary: inputs enter it (a connection
-    /// whose consumer is inside and producer is outside), outputs leave it (vice versa).</summary>
+    /// <summary>The outpost box's ports. Each Import handle inside is an input, each Export an
+    /// output — they are the explicit, canonical boundary, so a handle declared from inside (wired
+    /// only to interior machines) still shows on the box. Any direct connection that crosses the
+    /// boundary without a handle is surfaced too, defensively.</summary>
     public static (List<string> InParts, List<string> OutParts) OutpostBoundaryParts(FactoryNode outpost, FactoryGraph graph)
     {
         var inParts = new List<string>();
         var outParts = new List<string>();
+
+        foreach (var n in graph.Nodes)
+        {
+            if (n.Parent != outpost) continue;
+            if (n.Kind == NodeKind.Import && !inParts.Contains(n.Name)) inParts.Add(n.Name);
+            else if (n.Kind == NodeKind.Export && !outParts.Contains(n.Name)) outParts.Add(n.Name);
+        }
+
         foreach (var c in graph.Connections)
         {
             var fromInside = IsInside(c.From, outpost);
