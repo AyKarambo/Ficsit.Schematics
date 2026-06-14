@@ -35,4 +35,18 @@ public sealed class PlanResult
 
     /// <summary>Provided inputs that are fully used up and cap the output.</summary>
     public List<string> Bottlenecks { get; } = [];
+
+    /// <summary>Total Somersloops the plan spends on production amplification (0 = none).</summary>
+    public int SomersloopsUsed { get; set; }
+
+    /// <summary>Total MW the planned generators produce (0 unless a power target was set).</summary>
+    public Rational PowerGeneratedMW { get; set; } = Rational.Zero;
+
+    /// <summary>
+    /// Uniform clock factor applied to all recipes by the clock-fit post-pass (1 = no fit,
+    /// today's default). When &gt; 1 the plan is overclocked; &lt; 1 it is underclocked.
+    /// <see cref="PlannedRecipe.Machines"/> already reflects the divided count at this clock;
+    /// <see cref="TotalMachines"/> and <see cref="TotalPowerMW"/> are also recomputed.
+    /// </summary>
+    public Rational ClockFactor { get; set; } = Rational.One;
 }

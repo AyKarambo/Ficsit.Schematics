@@ -156,4 +156,21 @@ public class GameDataTests
         Assert.Equal("20", recipe.RatePerMinute("Iron Plate").ToString());
         Assert.Equal("-30", recipe.RatePerMinute("Iron Ingot").ToString());
     }
+
+    [Fact]
+    public void MaxBeltThroughput_equals_top_belt_mark_from_catalog()
+    {
+        // AWESOME Sink belt marks: Mk1=60, Mk2=120, Mk3=270, Mk4=480, Mk5=780, Mk6=1200.
+        // The maximum is 1200/min (Mk.6 Belt).
+        var db = TestData.Database;
+        Assert.Equal(new Ficsit.Schematics.Core.Numerics.Rational(1200), db.MaxBeltThroughput);
+    }
+
+    [Fact]
+    public void MaxPipeThroughput_equals_Mk2_pipe_value()
+    {
+        // Satisfactory Mk.2 pipe capacity is 600/min.
+        var db = TestData.Database;
+        Assert.Equal(new Ficsit.Schematics.Core.Numerics.Rational(600), db.MaxPipeThroughput);
+    }
 }

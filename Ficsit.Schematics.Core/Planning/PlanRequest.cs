@@ -39,4 +39,28 @@ public sealed class PlanRequest
     /// multiplies the baseline weight, so it learns no new concept.
     /// </summary>
     public Dictionary<string, Rational> WeightMultipliers { get; } = [];
+
+    /// <summary>
+    /// Somersloops the plan may spend on production amplification (0 = off, today's
+    /// behavior). The planner greedily picks which sloopable recipes to amplify, then
+    /// re-solves so the whole chain rebalances around the boosted output. Ignored under
+    /// <see cref="PlanBias.Power"/> (slooping costs power).
+    /// </summary>
+    public int SomersloopBudget { get; set; }
+
+    /// <summary>
+    /// Post-solve uniform overclock fit mode (default <see cref="FitMode.None"/> —
+    /// today's behavior unchanged). When set to <see cref="FitMode.Machines"/> or
+    /// <see cref="FitMode.Power"/>, a single clock factor is computed after the solve
+    /// and applied uniformly to all recipes so the total fits the given
+    /// <see cref="FitBudget"/>. The factor is clamped to (0.01, 2.5].
+    /// </summary>
+    public FitMode FitMode { get; set; } = FitMode.None;
+
+    /// <summary>
+    /// The target budget for <see cref="FitMode"/>: machine count or MW (depending on
+    /// <see cref="FitMode"/>). Ignored when <see cref="FitMode"/> is
+    /// <see cref="FitMode.None"/> or when ≤ 0.
+    /// </summary>
+    public Rational FitBudget { get; set; }
 }

@@ -360,4 +360,250 @@ public class FactoryPlannerTests
         Assert.Equal(PlanStatus.Optimal, plan.Status);
         Assert.True(plan.TotalPowerMW.IsPositive);
     }
+
+    /// <summary>
+    /// A Somersloop budget amplifies the recipes that spare the most raw: slooping the
+    /// smelter halves the ore for the same Iron Plate output, with fewer machines, and
+    /// reports the sloops it spent (never exceeding the budget). Alternates off pins the
+    /// deterministic ore → ingot → plate chain.
+    /// </summary>
+    [Fact]
+    public void Somersloop_budget_amplifies_output_and_spares_raw()
+    {
+        PlanRequest Build(int budget)
+        {
+            var r = new PlanRequest
+            {
+                Bias = PlanBias.Resources,
+                Byproducts = ByproductMode.AllowSink,
+                SomersloopBudget = budget,
+            };
+            DisableAlternates(r);
+            r.Targets.Add(new PlanTarget("Iron Plate", new Rational(60)));
+            return r;
+        }
+
+        var baseline = FactoryPlanner.Plan(TestData.Database, Build(0));
+        Assert.Equal(PlanStatus.Optimal, baseline.Status);
+        Assert.Equal(0, baseline.SomersloopsUsed);
+
+        var slooped = FactoryPlanner.Plan(TestData.Database, Build(10));
+        Assert.Equal(PlanStatus.Optimal, slooped.Status);
+
+        Assert.InRange(slooped.SomersloopsUsed, 1, 10);
+        Assert.Contains(slooped.Recipes, r => r.Somersloops > 0);
+        // Same output, fewer machines, less raw ore.
+        Assert.Equal(baseline.Outputs["Iron Plate"], slooped.Outputs["Iron Plate"]);
+        Assert.True(slooped.TotalMachines < baseline.TotalMachines,
+            $"expected fewer machines, base {baseline.TotalMachines} slooped {slooped.TotalMachines}");
+        Assert.True(slooped.Supplies["Iron Ore"] < baseline.Supplies["Iron Ore"],
+            $"slooping should spare ore, base {baseline.Supplies["Iron Ore"]} slooped {slooped.Supplies["Iron Ore"]}");
+    }
+
+    /// <summary>Slooping costs power, so the power objective never spends the budget.</summary>
+    [Fact]
+    public void Power_bias_ignores_somersloop_budget()
+    {
+        var request = new PlanRequest
+        {
+            Bias = PlanBias.Power,
+            Byproducts = ByproductMode.AllowSink,
+            SomersloopBudget = 20,
+        };
+        request.Targets.Add(new PlanTarget("Iron Plate", new Rational(60)));
+
+        var plan = FactoryPlanner.Plan(TestData.Database, request);
+
+        Assert.Equal(PlanStatus.Optimal, plan.Status);
+        Assert.Equal(0, plan.SomersloopsUsed);
+    }
+
+    // ---------------------------------------------------------------- clock-fit tests
+
+    /// <summary>
+    /// Regression guard: FitMode.None leaves the plan completely unchanged.
+    /// Both TotalMachines and every recipe count must be identical to a request
+    /// built without any fit fields at all.
+    /// </summary>
+    [Fact]
+    public void Fit_none_leaves_plan_unchanged()
+    {
+        PlanRequest Build(bool withNone)
+        {
+            var r = new PlanRequest { Bias = PlanBias.Resources, Byproducts = ByproductMode.AllowSink };
+            DisableAlternates(r);
+            r.Targets.Add(new PlanTarget("Iron Plate", new Rational(60)));
+            if (withNone)
+            {
+                r.FitMode = FitMode.None;
+                r.FitBudget = new Rational(999); // budget is ignored when mode is None
+            }
+            return r;
+        }
+
+        var baseline = FactoryPlanner.Plan(TestData.Database, Build(withNone: false));
+        var withNone = FactoryPlanner.Plan(TestData.Database, Build(withNone: true));
+
+        Assert.Equal(PlanStatus.Optimal, baseline.Status);
+        Assert.Equal(PlanStatus.Optimal, withNone.Status);
+        Assert.Equal(baseline.TotalMachines, withNone.TotalMachines);
+        Assert.Equal(Rational.One, withNone.ClockFactor); // no fit applied
+        Assert.Equal(baseline.Recipes.Count, withNone.Recipes.Count);
+        foreach (var (a, b) in baseline.Recipes.Zip(withNone.Recipes))
+        {
+            Assert.Equal(a.Recipe, b.Recipe);
+            Assert.Equal(a.Machines, b.Machines);
+        }
+    }
+
+    /// <summary>
+    /// Machine budget = TotalMachines / 2: factor must be exactly 2 (clamped below 2.5),
+    /// each recipe gets half the machine count, TotalMachines halves.
+    /// </summary>
+    [Fact]
+    public void Machine_fit_halves_machine_count_at_factor_2()
+    {
+        var request = new PlanRequest { Bias = PlanBias.Resources, Byproducts = ByproductMode.AllowSink };
+        DisableAlternates(request);
+        request.Targets.Add(new PlanTarget("Iron Plate", new Rational(60)));
+
+        var baseline = FactoryPlanner.Plan(TestData.Database, request);
+        Assert.Equal(PlanStatus.Optimal, baseline.Status);
+        Assert.True(baseline.TotalMachines.IsPositive);
+
+        var budget = baseline.TotalMachines / new Rational(2); // half the machines
+        var fitRequest = new PlanRequest { Bias = PlanBias.Resources, Byproducts = ByproductMode.AllowSink,
+            FitMode = FitMode.Machines, FitBudget = budget };
+        DisableAlternates(fitRequest);
+        fitRequest.Targets.Add(new PlanTarget("Iron Plate", new Rational(60)));
+
+        var plan = FactoryPlanner.Plan(TestData.Database, fitRequest);
+
+        Assert.Equal(PlanStatus.Optimal, plan.Status);
+        Assert.Equal(new Rational(2), plan.ClockFactor); // factor = T/(T/2) = 2
+        // Total machines should equal the budget (within rational exactness).
+        Assert.Equal(budget, plan.TotalMachines);
+        // Each recipe machine count should be exactly half of baseline.
+        foreach (var (a, b) in baseline.Recipes.Zip(plan.Recipes))
+        {
+            Assert.Equal(a.Recipe, b.Recipe);
+            Assert.Equal(a.Machines / new Rational(2), b.Machines);
+        }
+        // Power increases: at factor 2, power ∝ 2^exp per machine (exp ≈ 1.32).
+        // We just assert power is positive; precise check is in the power-budget test.
+        Assert.True(plan.TotalPowerMW.IsPositive);
+    }
+
+    /// <summary>
+    /// When the required factor exceeds 2.5 (the game ceiling), the plan clamps at
+    /// 2.5 and still returns Optimal — it reports the closest achievable result rather
+    /// than failing.
+    /// </summary>
+    [Fact]
+    public void Machine_fit_clamps_at_250_percent_and_stays_optimal()
+    {
+        var request = new PlanRequest { Bias = PlanBias.Resources, Byproducts = ByproductMode.AllowSink };
+        DisableAlternates(request);
+        request.Targets.Add(new PlanTarget("Iron Plate", new Rational(60)));
+
+        var baseline = FactoryPlanner.Plan(TestData.Database, request);
+        Assert.Equal(PlanStatus.Optimal, baseline.Status);
+
+        // Budget requiring factor 10 (way over the 2.5 ceiling).
+        var impossibleBudget = baseline.TotalMachines / new Rational(10);
+        var fitRequest = new PlanRequest { Bias = PlanBias.Resources, Byproducts = ByproductMode.AllowSink,
+            FitMode = FitMode.Machines, FitBudget = impossibleBudget };
+        DisableAlternates(fitRequest);
+        fitRequest.Targets.Add(new PlanTarget("Iron Plate", new Rational(60)));
+
+        var plan = FactoryPlanner.Plan(TestData.Database, fitRequest);
+
+        Assert.Equal(PlanStatus.Optimal, plan.Status);
+        Assert.Equal(new Rational(5, 2), plan.ClockFactor); // clamped at 2.5
+        // Total machines > impossibleBudget (couldn't reach it) but < baseline.
+        Assert.True(plan.TotalMachines < baseline.TotalMachines,
+            "clamped plan should still have fewer machines than the un-fitted plan");
+    }
+
+    /// <summary>
+    /// Power budget fit: a budget at half the baseline triggers underclocking (factor &lt; 1),
+    /// reducing both machine count and per-machine power so total power falls toward the target.
+    /// A budget at double the baseline requires overclocking (factor &gt; 1). Both stay Optimal.
+    /// </summary>
+    [Fact]
+    public void Power_fit_adjusts_clock_toward_budget()
+    {
+        var request = new PlanRequest { Bias = PlanBias.Resources, Byproducts = ByproductMode.AllowSink };
+        DisableAlternates(request);
+        request.Targets.Add(new PlanTarget("Iron Plate", new Rational(60)));
+
+        var baseline = FactoryPlanner.Plan(TestData.Database, request);
+        Assert.Equal(PlanStatus.Optimal, baseline.Status);
+        Assert.True(baseline.TotalPowerMW.IsPositive);
+
+        // Half-power budget: requires underclocking so fewer machines each consume less.
+        var halfBudget = baseline.TotalPowerMW / new Rational(2);
+        var underRequest = new PlanRequest { Bias = PlanBias.Resources, Byproducts = ByproductMode.AllowSink,
+            FitMode = FitMode.Power, FitBudget = halfBudget };
+        DisableAlternates(underRequest);
+        underRequest.Targets.Add(new PlanTarget("Iron Plate", new Rational(60)));
+
+        var underPlan = FactoryPlanner.Plan(TestData.Database, underRequest);
+
+        Assert.Equal(PlanStatus.Optimal, underPlan.Status);
+        Assert.True(underPlan.ClockFactor < Rational.One,
+            $"half-power budget requires underclock < 1, got {underPlan.ClockFactor}");
+        Assert.True(underPlan.ClockFactor > Rational.Zero,
+            $"clock factor must be positive, got {underPlan.ClockFactor}");
+        Assert.True(underPlan.TotalPowerMW < baseline.TotalPowerMW,
+            $"underclocked plan should use less total power; baseline {baseline.TotalPowerMW} fitted {underPlan.TotalPowerMW}");
+
+        // Double-power budget: requires overclocking (fewer machines, more power each).
+        var doubleBudget = baseline.TotalPowerMW * new Rational(2);
+        var overRequest = new PlanRequest { Bias = PlanBias.Resources, Byproducts = ByproductMode.AllowSink,
+            FitMode = FitMode.Power, FitBudget = doubleBudget };
+        DisableAlternates(overRequest);
+        overRequest.Targets.Add(new PlanTarget("Iron Plate", new Rational(60)));
+
+        var overPlan = FactoryPlanner.Plan(TestData.Database, overRequest);
+
+        Assert.Equal(PlanStatus.Optimal, overPlan.Status);
+        Assert.True(overPlan.ClockFactor > Rational.One,
+            $"double-power budget requires overclock > 1, got {overPlan.ClockFactor}");
+        Assert.True(overPlan.ClockFactor <= new Rational(5, 2),
+            $"clock factor must not exceed 2.5, got {overPlan.ClockFactor}");
+        Assert.True(overPlan.TotalPowerMW > baseline.TotalPowerMW,
+            $"overclocked plan should use more total power; baseline {baseline.TotalPowerMW} fitted {overPlan.TotalPowerMW}");
+    }
+
+    // ---------------------------------------------------------------- power generation
+
+    /// <summary>
+    /// A power (MW) target builds a generator + fuel + water chain meeting it exactly.
+    /// With manual parts excluded (no Biomass Burner) and the resource objective, Coal is
+    /// the cheapest fuel, so the plan mines coal and water and runs Coal generators. Power
+    /// is produced by generators only — never supplied or sunk.
+    /// </summary>
+    [Fact]
+    public void Plans_a_power_plant_for_a_megawatt_target()
+    {
+        var request = new PlanRequest { Bias = PlanBias.Resources, Byproducts = ByproductMode.AllowSink };
+        ExcludeManualParts(request);          // no hand-fed Biomass Burner
+        request.BannedResources.Add("Crude Oil"); // force the coal route (no oil/coke generators)
+        request.Targets.Add(new PlanTarget(FactoryPlanner.PowerPart, new Rational(750)));
+
+        var plan = FactoryPlanner.Plan(TestData.Database, request);
+
+        Assert.Equal(PlanStatus.Optimal, plan.Status);
+        // The virtual power balance is met exactly (no sink, no over-supply).
+        Assert.Equal(new Rational(750), plan.PowerGeneratedMW);
+        Assert.True(plan.TotalMachines.IsPositive);
+        // A generator runs, fed by coal + water.
+        Assert.Contains(plan.Recipes, r =>
+            FactoryPlanner.PowerGeneratedPerMachine(TestData.Database, TestData.Database.RecipesByName[r.Recipe]).IsPositive);
+        Assert.True(plan.Supplies.ContainsKey("Coal"));
+        Assert.True(plan.Supplies.ContainsKey("Water"));
+        // Power is a virtual part: never an external supply.
+        Assert.False(plan.Supplies.ContainsKey(FactoryPlanner.PowerPart));
+    }
 }

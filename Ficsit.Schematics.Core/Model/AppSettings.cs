@@ -35,6 +35,12 @@ public sealed class AppSettings
     /// <summary>Hovering/selecting one machine fades everything but its connections. Default on.</summary>
     public bool FocusHighlight { get; set; } = true;
 
+    /// <summary>
+    /// Flag connections whose solved flow exceeds the top belt (solids) or top pipe
+    /// (fluids) throughput with a warning glyph and red tint. Default on.
+    /// </summary>
+    public bool ShowBeltCapacityWarnings { get; set; } = true;
+
     /// <summary>Render the world map (with imported resource nodes) behind the canvas.</summary>
     public bool ShowMap { get; set; }
 
@@ -86,6 +92,26 @@ public sealed class AppSettings
     /// <see cref="Planning.FactoryPlanner.RecipesAboveTier"/>.
     /// </summary>
     public int PlannerMaxTierPhase { get; set; } = 99;
+
+    /// <summary>
+    /// Auto-planner: Somersloops the plan may spend on production amplification.
+    /// 0 = off (no amplification). The Auto-Plan panel writes this; it maps onto
+    /// <see cref="Planning.PlanRequest.SomersloopBudget"/>.
+    /// </summary>
+    public int PlannerSomersloopBudget { get; set; }
+
+    /// <summary>
+    /// Auto-planner: clock-fit mode (0 = None, 1 = Machines, 2 = Power). Default 0 (off).
+    /// Maps onto <see cref="Planning.FitMode"/> when the plan request is built.
+    /// </summary>
+    public int PlannerFitMode { get; set; }
+
+    /// <summary>
+    /// Auto-planner: the budget for the clock-fit (machine count or MW depending on
+    /// <see cref="PlannerFitMode"/>). Empty string = 0 (disabled). Stored as a string
+    /// to accept fractional budgets without a lossy float round-trip.
+    /// </summary>
+    public string PlannerFitBudget { get; set; } = string.Empty;
 
     /// <summary>
     /// Auto-planner: skip the draft review and build straight onto the canvas when a

@@ -75,6 +75,22 @@ public class StoreTests : IDisposable
     }
 
     [Fact]
+    public void ShowBeltCapacityWarnings_roundtrips()
+    {
+        using var store = new FicsitStore(_path);
+        // Default is on.
+        var settings = store.LoadSettings();
+        Assert.True(settings.ShowBeltCapacityWarnings);
+
+        // Persist the toggled-off value.
+        settings.ShowBeltCapacityWarnings = false;
+        store.SaveSettings(settings);
+
+        var reloaded = store.LoadSettings();
+        Assert.False(reloaded.ShowBeltCapacityWarnings);
+    }
+
+    [Fact]
     public void Planner_settings_roundtrip()
     {
         using var store = new FicsitStore(_path);
@@ -85,6 +101,7 @@ public class StoreTests : IDisposable
         Assert.Empty(settings.PlannerDisabledRecipes);
         Assert.Empty(settings.PlannerResourcePreferences);
         Assert.Equal(99, settings.PlannerMaxTierPhase);
+        Assert.Equal(0, settings.PlannerSomersloopBudget);
         Assert.False(settings.PlannerAutoApply);
         Assert.True(settings.PlannerAutoCollapse);
 
@@ -95,6 +112,7 @@ public class StoreTests : IDisposable
         settings.PlannerResourcePreferences["Iron Ore"] = 40;
         settings.PlannerResourcePreferences["Crude Oil"] = 5;
         settings.PlannerMaxTierPhase = 7;
+        settings.PlannerSomersloopBudget = 24;
         settings.PlannerAutoApply = true;
         settings.PlannerAutoCollapse = false;
         store.SaveSettings(settings);
@@ -108,6 +126,7 @@ public class StoreTests : IDisposable
         Assert.Equal(40, reloaded.PlannerResourcePreferences["Iron Ore"]);
         Assert.Equal(5, reloaded.PlannerResourcePreferences["Crude Oil"]);
         Assert.Equal(7, reloaded.PlannerMaxTierPhase);
+        Assert.Equal(24, reloaded.PlannerSomersloopBudget);
         Assert.True(reloaded.PlannerAutoApply);
         Assert.False(reloaded.PlannerAutoCollapse);
     }

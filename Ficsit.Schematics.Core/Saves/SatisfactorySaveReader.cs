@@ -45,6 +45,83 @@ public static class SatisfactorySaveReader
     public static IReadOnlyList<ResourceNodeInfo> ReadResourceNodes(string filePath)
         => ReadResourceNodes(File.ReadAllBytes(filePath));
 
+    // ------------------------------------------------- unlocked alternates
+
+    private const string PurchasedSchematicsProperty = "mPurchasedSchematics";
+    private const string AlternatePrefix = "Schematic_Alternate_";
+
+    public static IReadOnlyList<string> ReadUnlockedAlternateSchematics(string filePath)
+        => ReadUnlockedAlternateSchematics(File.ReadAllBytes(filePath));
+
+    /// <summary>
+    /// The stems of every unlocked <c>Schematic_Alternate_*</c> in the save's
+    /// <c>mPurchasedSchematics</c> array (e.g. "PureIronIngot", "BoltedFrame"). Reuses the
+    /// resource-node reader's chunk inflation; the array region is scanned for the alternate
+    /// asset paths rather than parsed by struct offset, which is robust across save versions
+    /// (see docs/specs/from-save-spike.md).
+    /// </summary>
+    public static IReadOnlyList<string> ReadUnlockedAlternateSchematics(byte[] saveFile)
+        => ReadAlternateStemsFromBody(DecompressBody(saveFile));
+
+    /// <summary>Parses alternate stems out of an already-decompressed save body. Public so it
+    /// can be unit-tested against a synthetic body without a real <c>.sav</c> fixture.</summary>
+    public static IReadOnlyList<string> ReadAlternateStemsFromBody(byte[] body)
+    {
+        var stems = new List<string>();
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+
+        var marker = Encoding.ASCII.GetBytes(PurchasedSchematicsProperty);
+        foreach (var at in FindAll(body, marker))
+        {
+            // Validate it's the FString property name: int32 length (= len + 1) precedes it,
+            // and it is null-terminated. (Mirrors ScanResourceOverrides' guards.)
+            if (at < 4) continue;
+            if (BitConverter.ToInt32(body, at - 4) != marker.Length + 1) continue;
+            if (at + marker.Length >= body.Length || body[at + marker.Length] != 0) continue;
+
+            CollectAlternateStems(body, at, stems, seen);
+            break; // exactly one occurrence in practice
+        }
+        return stems;
+    }
+
+    /// <summary>Walks forward from the property over the contiguous array, collecting the stem
+    /// after each <c>Schematic_Alternate_</c> token. Stops once the entries stop appearing
+    /// (a large gap = the array ended and other properties follow).</summary>
+    private static void CollectAlternateStems(byte[] body, int from, List<string> stems, HashSet<string> seen)
+    {
+        var token = Encoding.ASCII.GetBytes(AlternatePrefix);
+        var hardEnd = Math.Min(body.Length, from + 256 * 1024);
+        var pos = from;
+        var lastHit = from;
+        while (pos < hardEnd)
+        {
+            var idx = IndexOf(body, token, pos, hardEnd);
+            if (idx < 0 || idx - lastHit > 4096) break; // array ended; later refs aren't purchased
+            var start = idx + token.Length;
+            var end = start;
+            while (end < body.Length && (char.IsLetterOrDigit((char)body[end]) || body[end] == '_')) end++;
+            var stem = Encoding.ASCII.GetString(body, start, end - start);
+            if (stem.EndsWith("_C", StringComparison.Ordinal)) stem = stem[..^2]; // class-name copy
+            if (stem.Length > 0 && seen.Add(stem)) stems.Add(stem);
+            lastHit = idx;
+            pos = end;
+        }
+    }
+
+    private static int IndexOf(byte[] haystack, byte[] needle, int start, int end)
+    {
+        var limit = Math.Min(end, haystack.Length) - needle.Length;
+        for (var i = start; i <= limit; i++)
+        {
+            var match = true;
+            for (var j = 0; j < needle.Length; j++)
+                if (haystack[i + j] != needle[j]) { match = false; break; }
+            if (match) return i;
+        }
+        return -1;
+    }
+
     public static IReadOnlyList<ResourceNodeInfo> ReadResourceNodes(byte[] saveFile)
     {
         var body = DecompressBody(saveFile);

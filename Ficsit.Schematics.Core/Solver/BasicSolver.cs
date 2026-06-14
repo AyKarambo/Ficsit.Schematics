@@ -24,6 +24,13 @@ public sealed class BasicSolver(GameDatabase data) : ISolver
     /// </summary>
     public bool LimitsAreExact { get; init; }
 
+    /// <summary>
+    /// The "Full" calculator's distinguishing behavior: priority splitter / merger /
+    /// splurger nodes route by their connection (port) order — the highest-priority branch
+    /// takes all it wants before the next gets any — instead of Basic's proportional split.
+    /// </summary>
+    public bool HonorPriorities { get; init; }
+
     private sealed class State
     {
         public required NodeProfile Profile;
@@ -185,6 +192,13 @@ public sealed class BasicSolver(GameDatabase data) : ISolver
         var producer = states[connection.From];
         var consumer = states[connection.To];
 
+        // Full calculator: a priority splitter fills its branches in port order.
+        if (HonorPriorities && connection.From.Kind is NodeKind.PrioritySplitter or NodeKind.PrioritySplurger)
+        {
+            var priority = PriorityGrantForSplit(connection, states, incoming, outgoing, flows);
+            if (priority is not null) return priority;
+        }
+
         // What the producer can offer on this connection.
         var offerTotal = ProducerOffer(producer, connection.Part, incoming, flows);
         var siblingsOut = (outgoing.GetValueOrDefault(connection.From) ?? [])
@@ -232,6 +246,57 @@ public sealed class BasicSolver(GameDatabase data) : ISolver
         }
 
         return granted;
+    }
+
+    /// <summary>Full calculator: a priority splitter fills its outgoing branches in port
+    /// (connection) order — the first branch takes all it wants before the next gets any.
+    /// Returns null when the producer's supply is unlimited (priority doesn't bind; the
+    /// caller's default proportional split applies).</summary>
+    private Rational? PriorityGrantForSplit(
+        NodeConnection connection,
+        Dictionary<FactoryNode, State> states,
+        Dictionary<FactoryNode, List<NodeConnection>> incoming,
+        Dictionary<FactoryNode, List<NodeConnection>> outgoing,
+        Dictionary<NodeConnection, Rational?> flows)
+    {
+        var offer = ProducerOffer(states[connection.From], connection.Part, incoming, flows);
+        if (offer is null) return null;
+        var remaining = offer.Value;
+        foreach (var branch in (outgoing.GetValueOrDefault(connection.From) ?? [])
+                     .Where(c => c.Part == connection.Part)) // list order = priority
+        {
+            var request = DistributeRequest(branch,
+                ConsumerRequest(states[branch.To], branch.Part, incoming, flows),
+                incoming, states, flows);
+            var grant = request is null ? remaining : Rational.Min(request.Value, remaining);
+            if (ReferenceEquals(branch, connection)) return grant;
+            remaining -= grant;
+            if (remaining.IsNegative) remaining = Rational.Zero;
+        }
+        return Rational.Zero;
+    }
+
+    /// <summary>Full calculator: a priority merger draws from its incoming branches in port
+    /// order — drain the first supplier before taking from the next. Returns this
+    /// connection's share of the merger's total request.</summary>
+    private Rational PriorityMergerShare(
+        NodeConnection connection,
+        List<NodeConnection> suppliers,
+        Rational totalRequest,
+        Dictionary<FactoryNode, State> states,
+        Dictionary<FactoryNode, List<NodeConnection>> incoming,
+        Dictionary<NodeConnection, Rational?> flows)
+    {
+        var remaining = totalRequest;
+        foreach (var supplier in suppliers) // list order = priority
+        {
+            var offer = ProducerOffer(states[supplier.From], supplier.Part, incoming, flows);
+            var take = offer is null ? remaining : Rational.Min(offer.Value, remaining);
+            if (ReferenceEquals(supplier, connection)) return take;
+            remaining -= take;
+            if (remaining.IsNegative) remaining = Rational.Zero;
+        }
+        return Rational.Zero;
     }
 
     /// <summary>ppm of a part the producer can put on its outgoing connections in total.</summary>
@@ -284,6 +349,10 @@ public sealed class BasicSolver(GameDatabase data) : ISolver
         var suppliers = (incoming.GetValueOrDefault(connection.To) ?? [])
             .Where(c => c.Part == connection.Part).ToList();
         if (suppliers.Count <= 1) return totalRequest;
+
+        // Full calculator: a priority merger drains its branches in port order.
+        if (HonorPriorities && connection.To.Kind == NodeKind.PriorityMerger)
+            return PriorityMergerShare(connection, suppliers, totalRequest.Value, states, incoming, flows);
 
         // Allocate to bounded offers proportionally; unlimited offers share the rest evenly.
         var offers = suppliers.ToDictionary(

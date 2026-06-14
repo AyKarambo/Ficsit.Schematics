@@ -19,6 +19,20 @@ public sealed class GameDatabase
     /// <summary>Recipes grouped by produced part, in data order.</summary>
     public IReadOnlyDictionary<string, IReadOnlyList<RecipeDefinition>> RecipesByOutput { get; }
 
+    /// <summary>
+    /// The highest belt throughput (parts/min) present in the catalog — derived from the
+    /// Belt-mark capacities on machines such as the AWESOME Sink.  A future Mk.7 belt added
+    /// to the catalog will automatically raise this threshold.
+    /// </summary>
+    public Rational MaxBeltThroughput { get; }
+
+    /// <summary>
+    /// The highest pipe throughput (fluids/min) for a single pipeline.  Satisfactory ships
+    /// Mk.1 (300/min) and Mk.2 (600/min) pipes; pipes are not yet modeled as Belt-style
+    /// capacity entries in the catalog, so this constant reflects the Mk.2 value.
+    /// </summary>
+    public Rational MaxPipeThroughput { get; } = new Rational(600);
+
     public GameDatabase(GameDataDocument document)
     {
         Document = document;
@@ -33,6 +47,16 @@ public sealed class GameDatabase
                      .GroupBy(x => x.Part))
             byOutput[group.Key] = group.Select(x => x.Recipe).ToList();
         RecipesByOutput = byOutput;
+
+        // Derive MaxBeltThroughput from Belt-mark capacities in the catalog.
+        // Belt capacities are named "Mk.N Belt" and carry a parts-per-minute ratio.
+        var beltMax = document.MultiMachines
+            .SelectMany(mm => mm.Capacities)
+            .Where(c => c.Name.EndsWith(" Belt", StringComparison.Ordinal) && c.PartsRatio.HasValue)
+            .Select(c => c.PartsRatio!.Value)
+            .DefaultIfEmpty(new Rational(1200))
+            .Max();
+        MaxBeltThroughput = beltMax;
     }
 
     /// <summary>

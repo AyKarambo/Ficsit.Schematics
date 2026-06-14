@@ -150,10 +150,9 @@ internal sealed class NodeProfile
         data.MachinesByName.TryGetValue(machineName, out var machine);
 
         var clock = node.ClockSpeed;
-        var sloopBoost = Rational.One;
-        if (node.Somersloops > 0 && machine is { MaxProductionShards: > 0 })
-            sloopBoost = Rational.One
-                + new Rational(node.Somersloops, machine.MaxProductionShards) * machine.ProductionShardMultiplierValue;
+        var sloopBoost = machine is not null
+            ? Amplification.OutputFactor(machine, node.Somersloops)
+            : Rational.One;
 
         var inputMultiplier = GameDatabase.ParseOrZero(
             recipe.Machine == "Space Elevator" ? document.SpaceElevatorMultiplier : document.InputMultiplier);
@@ -201,10 +200,7 @@ internal sealed class NodeProfile
         var clockFactor = clock == Rational.One
             ? 1.0
             : clock.Pow(_machine.OverclockPowerExponentValue);
-        var sloopPowerFactor = Node.Somersloops > 0 && _machine.MaxProductionShards > 0
-            ? new Rational(_machine.MaxProductionShards + Node.Somersloops, _machine.MaxProductionShards)
-                .Pow(_machine.ProductionShardPowerExponentValue)
-            : 1.0;
+        var sloopPowerFactor = Amplification.PowerFactor(_machine, Node.Somersloops);
         var approx = power.ToDouble() * clockFactor * (power.IsNegative ? sloopPowerFactor : 1.0);
         if (!_powerMultiplier.IsZero && power.IsNegative) approx *= _powerMultiplier.ToDouble();
         return FromDouble(approx) * _powerRatio;

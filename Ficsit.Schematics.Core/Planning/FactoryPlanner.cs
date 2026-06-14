@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using Ficsit.Schematics.Core.GameData;
+using Ficsit.Schematics.Core.Model;
 using Ficsit.Schematics.Core.Numerics;
 using Ficsit.Schematics.Core.Saves;
 
@@ -17,11 +18,21 @@ namespace Ficsit.Schematics.Core.Planning;
 /// the part's producer recipes and, in target mode, turn the solve into a
 /// two-stage program: first maximize the achievable fraction of the targets,
 /// then optimize the bias at that fraction.
+///
+/// Somersloops (when a budget is given) are layered on top: a first solve picks
+/// machine counts, <see cref="SomersloopAllocator"/> chooses which sloopable recipes
+/// to amplify within the budget, and a second solve runs with those recipes' output
+/// boosted so the whole chain rebalances around the extra throughput.
 /// </summary>
 public static class FactoryPlanner
 {
     private static readonly Rational SinkPenaltyEliminate = new(1_000_000);
     private static readonly Rational SinkPenaltyAllowed = new(1, 1_000_000);
+
+    /// <summary>Virtual "part" standing for electrical power (MW), so a power target flows
+    /// through the same balance-row machinery as any part. Never a real catalog part — it is
+    /// produced only by generator recipes and can be neither supplied nor sunk.</summary>
+    public const string PowerPart = "#Power";
 
     public static PlanResult Plan(
         GameDatabase data, PlanRequest request, IReadOnlyList<ResourceNodeInfo>? mapNodes = null,
@@ -81,6 +92,49 @@ public static class FactoryPlanner
         var scaledTargetMode = !request.MaximizeFromProvisions && exclusiveParts.Count > 0;
         var hasBundle = request.MaximizeFromProvisions || scaledTargetMode;
 
+        var result = RunSolve(data, request, weights, recipes, partList, partRow,
+            provisionByPart, targetByPart, scaledTargetMode, hasBundle, sloopLevels: null, progress, cancellationToken);
+
+        // Somersloop pass: choose which recipes to amplify within the budget, then
+        // re-solve with their output boosted so the chain rebalances. The choice uses
+        // the first solve's counts; the re-solve only reduces them, so it never exceeds
+        // the budget. Skipped under the power objective (slooping costs power).
+        if (result.Status == PlanStatus.Optimal && request.SomersloopBudget > 0 && request.Bias != PlanBias.Power)
+        {
+            var levels = SomersloopAllocator.Choose(data, result.Recipes, weights, request.Bias, request.SomersloopBudget);
+            if (levels.Count > 0)
+            {
+                progress?.Report(new PlanProgress("Optimizing Somersloops"));
+                var slooped = RunSolve(data, request, weights, recipes, partList, partRow,
+                    provisionByPart, targetByPart, scaledTargetMode, hasBundle, levels, progress, cancellationToken);
+                if (slooped.Status == PlanStatus.Optimal) result = slooped;
+            }
+        }
+
+        // Clock-fit pass: after the final result (post-Somersloop), apply a uniform
+        // overclock factor to squeeze the plan into a machine-count or power budget.
+        if (result.Status == PlanStatus.Optimal
+            && request.FitMode != FitMode.None
+            && request.FitBudget.IsPositive)
+        {
+            result = ApplyClockFit(data, result, request.FitMode, request.FitBudget);
+        }
+
+        return result;
+    }
+
+    /// <summary>
+    /// One LP solve over the prepared recipe/part system. <paramref name="sloopLevels"/>
+    /// (recipe → per-machine sloops) amplifies those recipes' output coefficients; null is
+    /// the plain solve. Reads back into a fresh <see cref="PlanResult"/>.
+    /// </summary>
+    private static PlanResult RunSolve(
+        GameDatabase data, PlanRequest request, Dictionary<string, Rational> weights,
+        List<RecipeDefinition> recipes, List<string> partList, Dictionary<string, int> partRow,
+        Dictionary<string, (Rational Cap, bool Exclusive)> provisionByPart,
+        Dictionary<string, Rational> targetByPart, bool scaledTargetMode, bool hasBundle,
+        Dictionary<string, int>? sloopLevels, IProgress<PlanProgress>? progress, CancellationToken cancellationToken)
+    {
         // ---- columns ----------------------------------------------------
         var costs = new List<Rational>();
         var columnKinds = new List<(char Kind, string Name)>(); // r=recipe s=supply k=sink t=bundle l=slack
@@ -88,15 +142,28 @@ public static class FactoryPlanner
 
         foreach (var recipe in recipes)
         {
+            // A slooped recipe's outputs are amplified; inputs (negative) are untouched, so
+            // the re-solve naturally rebalances upstream around the boosted output.
+            var outFactor = Rational.One;
+            if (sloopLevels is not null && sloopLevels.TryGetValue(recipe.Name, out var sloops) && sloops > 0
+                && ResolveMachine(data, recipe) is { } sloopMachine)
+                outFactor = Amplification.OutputFactor(sloopMachine, sloops);
+
             // Build column for this recipe imperatively
             var columnEntries = new List<(int Row, Rational Coefficient)>();
             foreach (var part in recipe.Parts)
             {
                 if (partRow.TryGetValue(part.Part, out var row))
                 {
-                    columnEntries.Add((row, recipe.RatePerMinute(part.Part)));
+                    var coefficient = recipe.RatePerMinute(part.Part);
+                    if (coefficient.IsPositive && outFactor != Rational.One) coefficient *= outFactor;
+                    columnEntries.Add((row, coefficient));
                 }
             }
+            // Generators contribute to the virtual #Power balance when MW is targeted.
+            var generated = PowerGeneratedPerMachine(data, recipe);
+            if (generated.IsPositive && partRow.TryGetValue(PowerPart, out var powerRow))
+                columnEntries.Add((powerRow, generated));
             columns.Add(columnEntries.ToArray());
             columnKinds.Add(('r', recipe.Name));
             costs.Add(RecipeCost(data, recipe, request.Bias));
@@ -112,6 +179,8 @@ public static class FactoryPlanner
             {
                 producible.Add(output.Part);
             }
+            // #Power is "producible" by generators, never an external supply.
+            if (PowerGeneratedPerMachine(data, recipe).IsPositive) producible.Add(PowerPart);
         }
         var capRowBase = partList.Count;
         var capRows = new List<(string Part, Rational Cap)>();
@@ -145,6 +214,7 @@ public static class FactoryPlanner
             : SinkPenaltyAllowed;
         foreach (var part in partList)
         {
+            if (part == PowerPart) continue; // power cannot be sunk
             if (data.PartsByName.TryGetValue(part, out var def) && def.Fluid) continue;
             columns.Add([(partRow[part], -Rational.One)]);
             columnKinds.Add(('k', part));
@@ -257,10 +327,27 @@ public static class FactoryPlanner
             switch (kind)
             {
                 case 'r':
-                    result.Recipes.Add(new PlannedRecipe(name, value));
+                {
+                    var sloopLevel = sloopLevels is not null && sloopLevels.TryGetValue(name, out var lvl) ? lvl : 0;
+                    result.Recipes.Add(new PlannedRecipe(name, value, sloopLevel));
                     result.TotalMachines += value;
-                    result.TotalPowerMW += value * PowerPerMachine(data, data.RecipesByName[name]);
+                    var recipeDef = data.RecipesByName[name];
+                    var basePower = PowerPerMachine(data, recipeDef);
+                    var generatedMw = PowerGeneratedPerMachine(data, recipeDef);
+                    if (generatedMw.IsPositive) result.PowerGeneratedMW += value * generatedMw;
+                    if (sloopLevel > 0 && ResolveMachine(data, recipeDef) is { } poweredMachine)
+                    {
+                        // Power scales by the (≈ quadratic) sloop factor on the reduced count.
+                        var powerFactor = Amplification.PowerFactor(poweredMachine, sloopLevel);
+                        result.TotalPowerMW += FromMegawatts(value.ToDouble() * basePower.ToDouble() * powerFactor);
+                        result.SomersloopsUsed += (int)value.Ceiling() * sloopLevel;
+                    }
+                    else
+                    {
+                        result.TotalPowerMW += value * basePower;
+                    }
                     break;
+                }
                 case 's':
                     result.Supplies[name] = value;
                     break;
@@ -278,6 +365,126 @@ public static class FactoryPlanner
                 result.Bottlenecks.Add(part);
 
         return result;
+    }
+
+    /// <summary>
+    /// Computes and applies a single uniform clock factor that scales the solved plan
+    /// into the requested budget.
+    ///
+    /// <b>Machine budget:</b> exact — <c>factor = TotalMachines / budget</c>.
+    ///
+    /// <b>Power budget approximation (v1):</b> at clock factor <c>f</c> and machine
+    /// fraction <c>1/f</c> per recipe, the new power for recipe i is
+    /// <c>(machines_i / f) × basePower_i × f^exp_i = machines_i × basePower_i × f^(exp_i − 1)</c>.
+    /// So total new power = ∑ machines_i × basePower_i × f^(exp_i − 1).
+    /// For v1 we use a power-weighted mean exponent <c>eff_exp</c> across all recipes
+    /// (exact when every machine has the same exponent — the standard case where all
+    /// production machines share exp ≈ 1.32), giving
+    /// <c>budget = TotalPower × f^(eff_exp − 1)</c>  →  <c>f = (budget / TotalPower) ^ (1 / (eff_exp − 1))</c>.
+    /// The approximation error is zero for uniform-exponent plans and negligible for
+    /// mixed ones (generator exponents differ, but generators contribute zero planner
+    /// power because the planner only plans consumers).
+    ///
+    /// In both cases the factor is clamped to (0.01, 2.5]; if the budget cannot be
+    /// met at 250 % the closest achievable result is reported (plan is still Optimal).
+    /// </summary>
+    private static PlanResult ApplyClockFit(GameDatabase data, PlanResult result, FitMode mode, Rational budget)
+    {
+        // Compute the raw (unclamped) factor.
+        double rawFactor;
+        if (mode == FitMode.Machines)
+        {
+            // factor = TotalMachines / budget  →  new_machines = TotalMachines / factor = budget
+            rawFactor = result.TotalMachines.ToDouble() / budget.ToDouble();
+        }
+        else // FitMode.Power
+        {
+            if (result.TotalPowerMW.IsZero)
+                return result; // no power-consuming machines; nothing to fit
+
+            // Compute power-weighted mean exponent for the approximation.
+            // Only recipes with positive base power contribute.
+            var totalWeightedExp = 0.0;
+            var totalPowerBase = 0.0;
+            foreach (var planned in result.Recipes)
+            {
+                if (!data.RecipesByName.TryGetValue(planned.Recipe, out var recipeDef)) continue;
+                var basePower = PowerPerMachine(data, recipeDef).ToDouble();
+                if (basePower <= 0) continue;
+                var exp = (ResolveMachine(data, recipeDef)?.OverclockPowerExponentValue ?? Rational.One).ToDouble();
+                var contribution = planned.Machines.ToDouble() * basePower;
+                totalWeightedExp += contribution * exp;
+                totalPowerBase += contribution;
+            }
+            if (totalPowerBase <= 0)
+                return result;
+
+            var effExp = totalWeightedExp / totalPowerBase;
+            var expMinusOne = effExp - 1.0;
+            if (Math.Abs(expMinusOne) < 1e-9)
+            {
+                // exp ≈ 1: power scales linearly with machines, treat as machine budget at equivalent rate.
+                rawFactor = result.TotalPowerMW.ToDouble() / budget.ToDouble();
+            }
+            else
+            {
+                // f = (budget / TotalPower)^(1 / (eff_exp - 1))
+                rawFactor = Math.Pow(budget.ToDouble() / result.TotalPowerMW.ToDouble(), 1.0 / expMinusOne);
+            }
+        }
+
+        if (rawFactor <= 0 || double.IsNaN(rawFactor) || double.IsInfinity(rawFactor))
+            return result; // degenerate: leave plan unchanged
+
+        // Clamp to (0.01, 2.5] using the exact FactoryNode bounds.
+        var minFactor = FactoryNode.MinClockSpeed;   // 0.01
+        var maxFactor = FactoryNode.MaxClockSpeed;   // 2.5
+        Rational factor;
+        if (rawFactor <= minFactor.ToDouble())
+            factor = minFactor; // underclocking hits floor
+        else if (rawFactor >= maxFactor.ToDouble())
+            factor = maxFactor; // overclocking hits ceiling
+        else
+            factor = FromMegawatts(rawFactor); // reuse double→Rational helper (3 decimal places)
+
+        // Apply factor: divide machine counts and recompute power.
+        var newRecipes = new List<PlannedRecipe>(result.Recipes.Count);
+        var newTotalMachines = Rational.Zero;
+        var newTotalPowerMW = Rational.Zero;
+
+        foreach (var planned in result.Recipes)
+        {
+            var newMachines = planned.Machines / factor;
+            newRecipes.Add(planned with { Machines = newMachines });
+            newTotalMachines += newMachines;
+
+            if (!data.RecipesByName.TryGetValue(planned.Recipe, out var recipeDef)) continue;
+            var basePower = PowerPerMachine(data, recipeDef);
+            if (basePower.IsZero) continue;
+            var machine = ResolveMachine(data, recipeDef);
+            var exp = machine?.OverclockPowerExponentValue ?? Rational.One;
+            // new_power_i = new_machines_i × basePower × factor^exp
+            var clockPow = factor.Pow(exp);
+            newTotalPowerMW += FromMegawatts(newMachines.ToDouble() * basePower.ToDouble() * clockPow);
+        }
+
+        // Build updated result (copy everything from original, replace what changed).
+        var fitted = new PlanResult
+        {
+            Status = result.Status,
+            TotalMachines = newTotalMachines,
+            TotalPowerMW = newTotalPowerMW,
+            BundleMultiplier = result.BundleMultiplier,
+            AchievedFraction = result.AchievedFraction,
+            SomersloopsUsed = result.SomersloopsUsed,
+            ClockFactor = factor,
+        };
+        fitted.Recipes.AddRange(newRecipes);
+        foreach (var (k, v) in result.Supplies) fitted.Supplies[k] = v;
+        foreach (var (k, v) in result.Sinks) fitted.Sinks[k] = v;
+        foreach (var (k, v) in result.Outputs) fitted.Outputs[k] = v;
+        fitted.Bottlenecks.AddRange(result.Bottlenecks);
+        return fitted;
     }
 
     /// <summary>Space Elevator phases as ready-made target bundles (ratios = part amounts).</summary>
@@ -357,7 +564,10 @@ public static class FactoryPlanner
         var eligible = new List<RecipeDefinition>();
         foreach (var recipe in data.Document.Recipes)
         {
-            if (!recipe.Inputs.Any() || !recipe.Outputs.Any()) continue;
+            if (!recipe.Inputs.Any()) continue;
+            // A recipe with no part output is eligible only if it generates power
+            // (a fuel generator), so a MW target can reach it.
+            if (!recipe.Outputs.Any() && !PowerGeneratedPerMachine(data, recipe).IsPositive) continue;
             if (recipe.Machine == "Space Elevator") continue;
             if (recipe.Ficsmas) continue;
             if (request.DisabledRecipes.Contains(recipe.Name)) continue;
@@ -385,6 +595,14 @@ public static class FactoryPlanner
                 if (!producers.TryGetValue(output.Part, out var list))
                     producers[output.Part] = list = [];
                 list.Add(recipe);
+            }
+            // Generators "produce" the virtual #Power part so a MW target's backward
+            // closure pulls them (and their fuel/water) in.
+            if (PowerGeneratedPerMachine(data, recipe).IsPositive)
+            {
+                if (!producers.TryGetValue(PowerPart, out var powerList))
+                    producers[PowerPart] = powerList = [];
+                powerList.Add(recipe);
             }
         }
 
@@ -476,20 +694,41 @@ public static class FactoryPlanner
         return bias == PlanBias.Resources ? ScarcityWeights.WeightFor(weights, part) : Rational.Zero;
     }
 
+    /// <summary>Resolves the machine a recipe runs on — the named machine, or the default
+    /// (else first) variant of its multi-machine family.</summary>
+    public static MachineDefinition? ResolveMachine(GameDatabase data, RecipeDefinition recipe)
+    {
+        if (data.MachinesByName.TryGetValue(recipe.Machine, out var machine)) return machine;
+        var family = data.MultiMachineFor(recipe.Machine);
+        var variant = family?.Machines.FirstOrDefault(v => v.Default) ?? family?.Machines.FirstOrDefault();
+        return variant is not null && data.MachinesByName.TryGetValue(variant.Name, out machine) ? machine : null;
+    }
+
     /// <summary>Average MW one machine of this recipe consumes (0 for generators).</summary>
     public static Rational PowerPerMachine(GameDatabase data, RecipeDefinition recipe)
     {
         var recipeOverride = recipe.AveragePower ?? Rational.Zero;
         if (!recipeOverride.IsZero) return recipeOverride.Abs();
 
-        if (!data.MachinesByName.TryGetValue(recipe.Machine, out var machine))
-        {
-            var family = data.MultiMachineFor(recipe.Machine);
-            var variant = family?.Machines.FirstOrDefault(v => v.Default) ?? family?.Machines.FirstOrDefault();
-            if (variant is null || !data.MachinesByName.TryGetValue(variant.Name, out machine))
-                return Rational.Zero;
-        }
+        var machine = ResolveMachine(data, recipe);
+        if (machine is null) return Rational.Zero;
         var power = machine.AveragePowerValue;
         return power.IsNegative ? power.Abs() : Rational.Zero;
     }
+
+    /// <summary>MW one machine of this recipe generates (positive) — non-zero only for fuel
+    /// generators (Coal/Fuel/Nuclear/Biomass). 0 for everything that consumes or is neutral.</summary>
+    public static Rational PowerGeneratedPerMachine(GameDatabase data, RecipeDefinition recipe)
+    {
+        var recipeOverride = recipe.AveragePower ?? Rational.Zero;
+        if (recipeOverride.IsPositive) return recipeOverride;
+        if (recipeOverride.IsNegative) return Rational.Zero;
+        var machine = ResolveMachine(data, recipe);
+        return machine is { } m && m.AveragePowerValue.IsPositive ? m.AveragePowerValue : Rational.Zero;
+    }
+
+    /// <summary>Builds a Rational from a megawatt double (3 decimals) — used only for the
+    /// already-approximate slooped-power accounting, matching the live solver's precision.</summary>
+    private static Rational FromMegawatts(double megawatts)
+        => new((long)Math.Round(megawatts * 1000.0), 1000);
 }

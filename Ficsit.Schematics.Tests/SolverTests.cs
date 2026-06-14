@@ -135,6 +135,50 @@ public class SolverTests
     }
 
     [Fact]
+    public void Full_solver_routes_priority_splitter_by_branch_order()
+    {
+        var doc = new FactoryDocument();
+        var miner = Node(doc, "Iron Ore", "60");
+        var splitter = Node(doc, "Priority Splitter");
+        var a = Node(doc, "Iron Ingot", "2"); // first branch — wants 60
+        var b = Node(doc, "Iron Ingot", "2"); // second branch — wants 60 (total 120 > 60)
+        Connect(doc, miner, "Iron Ore", splitter);
+        Connect(doc, splitter, "Iron Ore", a);
+        Connect(doc, splitter, "Iron Ore", b);
+
+        // Basic shares proportionally: equal demand → 30 each → one machine each.
+        var basic = SolverFactory.Create("Basic", TestData.Database).Solve(doc);
+        Assert.Equal(Rational.One, basic.For(a).Count);
+        Assert.Equal(Rational.One, basic.For(b).Count);
+
+        // Full fills the first branch fully (2 machines), starving the second.
+        var full = SolverFactory.Create("Full", TestData.Database).Solve(doc);
+        Assert.Equal(new Rational(2), full.For(a).Count);
+        Assert.Equal(Rational.Zero, full.For(b).Count);
+    }
+
+    [Fact]
+    public void Full_solver_drains_priority_merger_by_branch_order()
+    {
+        var doc = new FactoryDocument();
+        var minerA = Node(doc, "Iron Ore", "60"); // first branch (priority)
+        var minerB = Node(doc, "Iron Ore", "60"); // second branch
+        var merger = Node(doc, "Priority Merger");
+        var smelter = Node(doc, "Iron Ingot", "2"); // wants 60 total
+        Connect(doc, minerA, "Iron Ore", merger);
+        Connect(doc, minerB, "Iron Ore", merger);
+        Connect(doc, merger, "Iron Ore", smelter);
+
+        var full = SolverFactory.Create("Full", TestData.Database).Solve(doc);
+
+        var aConn = doc.Root.Connections.First(c => c.From == minerA);
+        var bConn = doc.Root.Connections.First(c => c.From == minerB);
+        Assert.Equal(new Rational(60), full.Flows[aConn]); // first supplier drained first
+        Assert.Equal(Rational.Zero, full.Flows[bConn]);    // second untouched
+        Assert.Equal(new Rational(2), full.For(smelter).Count);
+    }
+
+    [Fact]
     public void Merger_combines_two_sources()
     {
         var doc = new FactoryDocument();
