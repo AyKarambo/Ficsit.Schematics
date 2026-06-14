@@ -175,43 +175,19 @@ public class SolverTests
         Assert.Equal(new Rational(60), result.For(sink).SinkPointsPerMinute);
     }
 
-    // ------------------------------------------------------------ Outposts
+    // ------------------------------------------------------------ Outposts (flat model)
 
     [Fact]
-    public void Outpost_passes_exterior_supply_through_to_the_interior()
+    public void A_member_connects_across_the_outpost_boundary()
     {
-        // Exterior miner → outpost (Import: Iron Ore) → interior smelter. The outpost is
-        // transparent: 60 ore must cross the boundary and run 2 interior smelters.
+        // Flat model: an outpost is a grouping. A member (Parent = outpost) connects to a node
+        // outside it as an ordinary connection; flow crosses the boundary freely.
         var doc = new FactoryDocument();
-        var miner = Node(doc, "Iron Ore", "60");
-        var outpost = Node(doc, "Outpost");
-        outpost.Children = new FactoryGraph();
-        var import = new FactoryNode { Name = "Iron Ore", Kind = NodeKind.Import };
-        var smelter = new FactoryNode { Name = "Iron Ingot", Kind = NodeKind.Recipe, Max = "2" };
-        outpost.Children.Nodes.Add(import);
-        outpost.Children.Nodes.Add(smelter);
-        outpost.Children.Connections.Add(new NodeConnection { From = import, To = smelter, Part = "Iron Ore" });
-        Connect(doc, miner, "Iron Ore", outpost);
-
-        var result = Solve(doc);
-        Assert.Equal(new Rational(2), result.For(smelter).Count);
-        Assert.Equal(new Rational(60), result.Flows[doc.Root.Connections.Single()]); // exterior wire carries 60
-    }
-
-    [Fact]
-    public void Outpost_passes_interior_output_through_to_the_exterior()
-    {
-        // Interior miner → outpost (Export: Iron Ore) → exterior smelter.
-        var doc = new FactoryDocument();
-        var outpost = Node(doc, "Outpost");
-        outpost.Children = new FactoryGraph();
-        var miner = new FactoryNode { Name = "Iron Ore", Kind = NodeKind.Recipe, Max = "60" };
-        var export = new FactoryNode { Name = "Iron Ore", Kind = NodeKind.Export };
-        outpost.Children.Nodes.Add(miner);
-        outpost.Children.Nodes.Add(export);
-        outpost.Children.Connections.Add(new NodeConnection { From = miner, To = export, Part = "Iron Ore" });
-        var smelter = Node(doc, "Iron Ingot", "2"); // exterior consumer wants 60 ore
-        Connect(doc, outpost, "Iron Ore", smelter);
+        var miner = Node(doc, "Iron Ore", "60");        // root
+        var outpost = Node(doc, "Outpost");              // grouping
+        var smelter = Node(doc, "Iron Ingot", "2");      // member, wants 60 ore
+        smelter.Parent = outpost;
+        Connect(doc, miner, "Iron Ore", smelter);
 
         var result = Solve(doc);
         Assert.Equal(new Rational(2), result.For(smelter).Count);
@@ -219,42 +195,40 @@ public class SolverTests
     }
 
     [Fact]
-    public void Connecting_to_an_outpost_creates_a_boundary_then_passes_through()
+    public void Outpost_container_is_inert_in_the_solve()
     {
-        // End-to-end through the editor: wiring from outside auto-creates the Import boundary;
-        // wiring it to an interior smelter then carries the 60 ore across the boundary.
         var doc = new FactoryDocument();
-        var miner = Node(doc, "Iron Ore", "60");
         var outpost = Node(doc, "Outpost");
-        outpost.Children = new FactoryGraph();
-        var smelter = new FactoryNode { Name = "Iron Ingot", Kind = NodeKind.Recipe, Max = "2" };
-        outpost.Children.Nodes.Add(smelter);
-
-        var editor = new FactoryEditor(TestData.Database);
-        editor.LoadDocument(doc);
-
-        Assert.True(editor.Connect(miner, "Iron Ore", outpost));
-        var import = outpost.Children.Nodes.Single(n => n.Kind == NodeKind.Import && n.Name == "Iron Ore");
-
-        editor.EnterOutpost(outpost);
-        Assert.True(editor.Connect(import, "Iron Ore", smelter));
-
-        Assert.Equal(new Rational(2), editor.Result.For(smelter).Count);
+        Assert.Equal(Rational.Zero, Solve(doc).For(outpost).Count); // a bracket, not a machine
     }
 
     [Fact]
-    public void Connecting_to_an_outpost_without_a_boundary_does_not_throw()
+    public void Deleting_an_outpost_deletes_its_members()
     {
-        // Regression: outpost connections once indexed a missing solver state and threw.
-        // With no boundary node the connection simply carries nothing (dropped from the solve).
         var doc = new FactoryDocument();
-        var miner = Node(doc, "Iron Ore", "60");
         var outpost = Node(doc, "Outpost");
-        outpost.Children = new FactoryGraph();
-        Connect(doc, miner, "Iron Ore", outpost);
+        var smelter = Node(doc, "Iron Ingot");
+        smelter.Parent = outpost;
 
-        var result = Solve(doc);
-        Assert.Equal(Rational.Zero, result.FlowOf(doc.Root.Connections.Single()));
+        var editor = new FactoryEditor(TestData.Database);
+        editor.LoadDocument(doc);
+        editor.DeleteNodes([outpost]);
+
+        Assert.Empty(doc.Root.Nodes); // the outpost and its member are both removed
+    }
+
+    [Fact]
+    public void Adding_a_node_inside_an_outpost_sets_its_parent()
+    {
+        var editor = new FactoryEditor(TestData.Database);
+        editor.LoadDocument(new FactoryDocument());
+        var outpost = editor.AddNode("Outpost", 0, 0);
+        editor.EnterOutpost(outpost);
+        var inner = editor.AddNode("Iron Ingot", 10, 10);
+
+        Assert.Equal(outpost, inner.Parent);
+        Assert.Contains(inner, editor.VisibleNodes);
+        Assert.DoesNotContain(outpost, editor.VisibleNodes); // outpost itself lives at root
     }
 
     [Fact]

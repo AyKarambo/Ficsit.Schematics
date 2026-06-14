@@ -79,9 +79,9 @@ public static class SfmdSerializer
             // Our extension (port reorder): persisted per-node display order.
             if (node.InputOrder.Count > 0) obj["InputOrder"] = PartArray(node.InputOrder);
             if (node.OutputOrder.Count > 0) obj["OutputOrder"] = PartArray(node.OutputOrder);
-            // Outpost boundary nodes carry their kind explicitly (Name holds the part, so it
-            // can't be recovered from the name the way specialty machines are).
-            if (node.Kind is NodeKind.Import or NodeKind.Export) obj["Kind"] = node.Kind.ToString();
+            // Flat outpost membership: which outpost (by index) this node belongs to.
+            if (node.Parent is not null && indexOf.TryGetValue(node.Parent, out var parentIndex))
+                obj["Parent"] = parentIndex;
             if (node.Kind == NodeKind.StorageContainer && node.StorageMode != StorageMode.PartiallyFull)
                 obj["Mode"] = StorageModeName(node.StorageMode);
 
@@ -90,8 +90,6 @@ public static class SfmdSerializer
                 obj["Zoom"] = node.InnerZoom;
                 obj["PanX"] = (int)Math.Round(node.InnerPanX);
                 obj["PanY"] = (int)Math.Round(node.InnerPanY);
-                if (node.Children is { Nodes.Count: > 0 })
-                    obj["Data"] = SerializeGraph(node.Children);
             }
 
             var inputs = new JsonObject();
@@ -160,8 +158,21 @@ public static class SfmdSerializer
     private static FactoryGraph DeserializeGraph(JsonArray data)
     {
         var graph = new FactoryGraph();
-        var byIndex = new List<FactoryNode>();
+        ReadArray(data, graph, parent: null);
+        return graph;
+    }
+
+    /// <summary>
+    /// Read a node array into the flat graph. Handles both layouts: the flat format (one array;
+    /// <c>Parent</c> gives outpost membership by index, <c>Inputs</c> reference indices in this
+    /// array) and the legacy nested format (an outpost carries a nested <c>Data</c> array with
+    /// indices local to it) — nested children are flattened in with their <c>Parent</c> set.
+    /// </summary>
+    private static void ReadArray(JsonArray data, FactoryGraph graph, FactoryNode? parent)
+    {
+        var local = new List<FactoryNode>();
         var pendingInputs = new List<(FactoryNode Node, string Part, List<int> Sources)>();
+        var pendingParent = new List<(FactoryNode Node, int Index)>();
 
         foreach (var element in data)
         {
@@ -170,9 +181,7 @@ public static class SfmdSerializer
             var node = new FactoryNode
             {
                 Name = name,
-                Kind = obj["Kind"] is { } kindNode && Enum.TryParse<NodeKind>(GetString(kindNode, string.Empty), out var explicitKind)
-                    ? explicitKind
-                    : KindFor(name),
+                Kind = KindFor(name),
                 X = GetDouble(obj["X"], 0),
                 Y = GetDouble(obj["Y"], 0),
                 Title = obj["Title"]?.GetValue<string>(),
@@ -182,6 +191,7 @@ public static class SfmdSerializer
                 MachineVariant = obj["Machine"]?.GetValue<string>(),
                 Capacity = obj["Capacity"]?.GetValue<string>(),
                 ResourceNodeId = obj["ResourceNode"]?.GetValue<string>(),
+                Parent = parent,
             };
 
             if (obj["Ppm"] is JsonValue ppm) node.ShowPpm = ppm.GetValue<bool>();
@@ -199,9 +209,10 @@ public static class SfmdSerializer
                 node.InnerZoom = GetDouble(obj["Zoom"], 1.0);
                 node.InnerPanX = GetDouble(obj["PanX"], 0);
                 node.InnerPanY = GetDouble(obj["PanY"], 0);
-                if (obj["Data"] is JsonArray nested)
-                    node.Children = DeserializeGraph(nested);
             }
+
+            var parentIndex = (int)GetDouble(obj["Parent"], -1);
+            if (parentIndex >= 0) pendingParent.Add((node, parentIndex));
 
             if (obj["Inputs"] is JsonObject inputs)
                 foreach (var (part, sourcesNode) in inputs)
@@ -210,20 +221,22 @@ public static class SfmdSerializer
                             sources.Select(s => (int)GetDouble(s, -1)).Where(i => i >= 0).ToList()));
 
             graph.Nodes.Add(node);
-            byIndex.Add(node);
+            local.Add(node);
+
+            // Legacy nested outpost: flatten its children in with Parent = this node.
+            if (obj["Data"] is JsonArray nested)
+                ReadArray(nested, graph, node);
         }
 
+        // Indices reference positions within THIS array (flat for the new format, local nested).
         foreach (var (node, part, sources) in pendingInputs)
             foreach (var sourceIndex in sources)
-                if (sourceIndex < byIndex.Count)
-                    graph.Connections.Add(new NodeConnection
-                    {
-                        From = byIndex[sourceIndex],
-                        To = node,
-                        Part = part,
-                    });
+                if (sourceIndex >= 0 && sourceIndex < local.Count)
+                    graph.Connections.Add(new NodeConnection { From = local[sourceIndex], To = node, Part = part });
 
-        return graph;
+        foreach (var (node, index) in pendingParent)
+            if (index >= 0 && index < local.Count)
+                node.Parent = local[index];
     }
 
     public static NodeKind KindFor(string name) => name switch

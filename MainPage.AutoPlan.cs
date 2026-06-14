@@ -378,10 +378,10 @@ public partial class MainPage
             if (!changed) break;
         }
 
-        // Place to the right of any existing content.
-        var scope = editor.CurrentScope;
-        var originX = scope.Nodes.Count > 0 ? scope.Nodes.Max(n => n.X) + 400 : (double)_drawable.ScreenToWorld(new PointF(120, 140)).X;
-        var originY = scope.Nodes.Count > 0 ? scope.Nodes.Min(n => n.Y) : (double)_drawable.ScreenToWorld(new PointF(120, 140)).Y;
+        // Place to the right of any existing content in the current scope.
+        var existing = editor.VisibleNodes.ToList();
+        var originX = existing.Count > 0 ? existing.Max(n => n.X) + 400 : (double)_drawable.ScreenToWorld(new PointF(120, 140)).X;
+        var originY = existing.Count > 0 ? existing.Min(n => n.Y) : (double)_drawable.ScreenToWorld(new PointF(120, 140)).Y;
 
         var created = new Dictionary<string, FactoryNode>();
         foreach (var column in layer.GroupBy(l => l.Value).OrderBy(g => g.Key))

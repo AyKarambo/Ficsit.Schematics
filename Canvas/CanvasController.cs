@@ -77,7 +77,7 @@ public sealed class CanvasController(AppState state, FactoryCanvasDrawable drawa
         if (!isRight && _pressPort is { IsInput: true } inputPort && _pressNode is not null)
         {
             // Re-drag an existing single connection to detach it.
-            var existing = state.Editor.CurrentScope
+            var existing = state.Editor.Graph
                 .IncomingTo(_pressNode, inputPort.Part).ToList();
             if (existing.Count == 1)
                 _detachedConnection = existing[0];
@@ -134,13 +134,12 @@ public sealed class CanvasController(AppState state, FactoryCanvasDrawable drawa
 
             case Mode.Connect:
                 // Staying within the pressed port's own side reorders it; otherwise it's a
-                // connection drag (pending wire + outpost drop zones).
+                // connection drag (pending wire).
                 if (_dragOutNode is null && TryReorderHint(world, out var insertLine))
                 {
                     _reorderActive = true;
                     drawable.PortInsertLine = insertLine;
                     drawable.PendingWire = null;
-                    drawable.OutpostDropHint = null;
                 }
                 else
                 {
@@ -151,7 +150,6 @@ public sealed class CanvasController(AppState state, FactoryCanvasDrawable drawa
                         ? drawable.WorldToScreen(anchorLayout.PortAnchor(_pressPort))
                         : _pressScreen;
                     drawable.PendingWire = (anchor, screen);
-                    UpdateOutpostDropHint(world);
                 }
                 Invalidate?.Invoke();
                 break;
@@ -191,7 +189,6 @@ public sealed class CanvasController(AppState state, FactoryCanvasDrawable drawa
 
             case Mode.Connect:
                 drawable.PendingWire = null;
-                drawable.OutpostDropHint = null;
                 drawable.PortInsertLine = null;
                 if (_reorderActive)
                     CommitReorder();
@@ -307,9 +304,6 @@ public sealed class CanvasController(AppState state, FactoryCanvasDrawable drawa
 
         var (targetNode, targetLayout) = HitNode(world);
         var targetPort = targetLayout?.HitPort(world);
-        if (targetNode is not null && targetLayout is not null
-            && targetNode.Kind is NodeKind.Outpost or NodeKind.Blueprint)
-            targetPort = OutpostDropPort(targetLayout, world);
 
         if (_detachedConnection is not null)
         {
@@ -326,20 +320,6 @@ public sealed class CanvasController(AppState state, FactoryCanvasDrawable drawa
 
         if (targetNode is null)
         {
-            // Inside an outpost, dropping a machine port on empty canvas declares a boundary:
-            // an input port wants supply from outside (Import), an output needs to leave (Export).
-            if (state.Editor.ScopePath.Count > 0 && _pressPort.Part != "AnyPart")
-            {
-                var isImport = _pressPort.IsInput;
-                state.Editor.Commands.BeginGroup(isImport ? "Add import" : "Add export");
-                var boundary = state.Editor.AddBoundaryNode(_pressPort.Part, isImport,
-                    world.X - NodeLayout.SpecialtySize / 2, world.Y - NodeLayout.SpecialtySize / 2);
-                if (isImport) state.Editor.Connect(boundary, _pressPort.Part, _pressNode);
-                else state.Editor.Connect(_pressNode, _pressPort.Part, boundary);
-                state.Editor.Commands.EndGroup();
-                drawable.InvalidateLayouts();
-                return;
-            }
             // Dropped on empty canvas: offer compatible recipes for this port.
             OpenChooserForPort?.Invoke(
                 new PortDragContext(_pressNode, _pressPort.Part, !_pressPort.IsInput), screen);
@@ -364,14 +344,11 @@ public sealed class CanvasController(AppState state, FactoryCanvasDrawable drawa
     {
         from = null; part = null; to = null;
         if (targetNode is null) return false;
+        // Outposts are groupings, not machines — you wire members from inside, not the box.
+        if (targetNode.Kind is NodeKind.Outpost or NodeKind.Blueprint
+            || pressNode.Kind is NodeKind.Outpost or NodeKind.Blueprint) return false;
 
-        // Dropping on an outpost/blueprint: the side hit decides its role — left/input side
-        // makes the outpost the consumer (the pressed end is the producer), right/output side
-        // makes it the producer. Otherwise the pressed port's own side decides direction.
-        var targetIsOutpost = targetNode.Kind is NodeKind.Outpost or NodeKind.Blueprint;
-        var pressIsOutput = targetIsOutpost && targetPort is not null
-            ? targetPort.IsInput
-            : !pressPort.IsInput;
+        var pressIsOutput = !pressPort.IsInput;
         var pressPart = pressPort.Part;
 
         if (pressIsOutput)
@@ -460,20 +437,20 @@ public sealed class CanvasController(AppState state, FactoryCanvasDrawable drawa
 
     private bool PortHasConnections(FactoryNode node, PortInfo port)
     {
-        var scope = state.Editor.CurrentScope;
+        var graph = state.Editor.Graph;
         return port.IsInput
-            ? scope.IncomingTo(node, port.Part).Any()
-            : scope.OutgoingFrom(node, port.Part).Any();
+            ? graph.IncomingTo(node, port.Part).Any()
+            : graph.OutgoingFrom(node, port.Part).Any();
     }
 
     /// <summary>Right-click → "Clear connection(s)": remove every connection on this exact
     /// port (same node, part and side) as one undo step.</summary>
     public void ClearPortConnections(FactoryNode node, PortInfo port)
     {
-        var scope = state.Editor.CurrentScope;
+        var graph = state.Editor.Graph;
         var doomed = (port.IsInput
-            ? scope.IncomingTo(node, port.Part)
-            : scope.OutgoingFrom(node, port.Part)).ToList();
+            ? graph.IncomingTo(node, port.Part)
+            : graph.OutgoingFrom(node, port.Part)).ToList();
         if (doomed.Count == 0) return;
         state.Editor.Commands.BeginGroup("Clear connections");
         foreach (var connection in doomed)
@@ -481,32 +458,6 @@ public sealed class CanvasController(AppState state, FactoryCanvasDrawable drawa
         state.Editor.Commands.EndGroup();
         drawable.InvalidateLayouts();
         Invalidate?.Invoke();
-    }
-
-    /// <summary>For an outpost/blueprint drop target the side under the pointer picks the
-    /// role: left half = input stub (it consumes), right half = output stub (it provides).</summary>
-    private static PortInfo? OutpostDropPort(NodeLayout layout, PointF world)
-        => world.X < layout.Bounds.Center.X
-            ? layout.Inputs.FirstOrDefault() ?? layout.Outputs.FirstOrDefault()
-            : layout.Outputs.FirstOrDefault() ?? layout.Inputs.FirstOrDefault();
-
-    /// <summary>While dragging a wire, show the left/right input/output drop zones when it
-    /// hovers an outpost or blueprint (other than the one the drag started from).</summary>
-    private void UpdateOutpostDropHint(PointF world)
-    {
-        var (node, layout) = HitNode(world);
-        if (node is not null && layout is not null && node != _pressNode
-            && node.Kind is NodeKind.Outpost or NodeKind.Blueprint)
-        {
-            var tl = drawable.WorldToScreen(new PointF(layout.Bounds.Left, layout.Bounds.Top));
-            var br = drawable.WorldToScreen(new PointF(layout.Bounds.Right, layout.Bounds.Bottom));
-            drawable.OutpostDropHint =
-                (new RectF(tl.X, tl.Y, br.X - tl.X, br.Y - tl.Y), world.X < layout.Bounds.Center.X);
-        }
-        else
-        {
-            drawable.OutpostDropHint = null;
-        }
     }
 
     // ------------------------------------------------------------------- misc
@@ -576,9 +527,8 @@ public sealed class CanvasController(AppState state, FactoryCanvasDrawable drawa
     private void SyncPanToDocument()
     {
         // Outposts remember their own view; the root view lives on the document.
-        if (state.Editor.ScopePath.Count > 0)
+        if (state.Editor.ActiveOutpost is { } outpost)
         {
-            var outpost = state.Editor.ScopePath[^1];
             outpost.InnerZoom = drawable.Zoom;
             outpost.InnerPanX = drawable.PanX;
             outpost.InnerPanY = drawable.PanY;
@@ -735,9 +685,6 @@ public sealed class CanvasController(AppState state, FactoryCanvasDrawable drawa
 
         var (targetNode, targetLayout) = HitNode(world);
         var targetPort = targetLayout?.HitPort(world);
-        if (targetNode is not null && targetLayout is not null
-            && targetNode.Kind is NodeKind.Outpost or NodeKind.Blueprint)
-            targetPort = OutpostDropPort(targetLayout, world);
 
         if (targetNode is not null && targetNode != node
             && TryResolveEndpoints(node, port, targetNode, targetPort, out var from, out var part, out var to))
@@ -773,7 +720,6 @@ public sealed class CanvasController(AppState state, FactoryCanvasDrawable drawa
         _pressMarker = null;
         _reorderActive = false;
         drawable.PendingWire = null;
-        drawable.OutpostDropHint = null;
         drawable.PortInsertLine = null;
         drawable.SnapPreviewMarker = null;
         drawable.RubberBand = null;
@@ -797,8 +743,8 @@ public sealed class CanvasController(AppState state, FactoryCanvasDrawable drawa
 
     private (FactoryNode?, NodeLayout?) HitNode(PointF world)
     {
-        // Topmost = last in list (drawn last).
-        foreach (var node in state.Editor.CurrentScope.Nodes.AsEnumerable().Reverse())
+        // Topmost = last drawn; only nodes visible in the current scope are hit-testable.
+        foreach (var node in state.Editor.VisibleNodes.ToList().AsEnumerable().Reverse())
         {
             if (!drawable.Layouts.TryGetValue(node, out var layout)) continue;
             var expanded = layout.Bounds;
@@ -811,7 +757,7 @@ public sealed class CanvasController(AppState state, FactoryCanvasDrawable drawa
     }
 
     private NodeConnection? HitConnectionLabel(PointF world)
-        => state.Editor.CurrentScope.Connections
+        => state.Editor.Graph.Connections
             .FirstOrDefault(c => drawable.ConnectionLabelRect(c).Contains(world));
 
     private NodeLayout? GetLayout(FactoryNode node)

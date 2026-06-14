@@ -63,9 +63,13 @@ public sealed class FactoryNode
     /// </summary>
     public string? ResourceNodeId { get; set; }
 
-    /// <summary>Nested canvas for outposts/blueprints.</summary>
-    public FactoryGraph? Children { get; set; }
+    /// <summary>
+    /// The outpost/blueprint this node belongs to (its "bracket"); null = root canvas.
+    /// Membership is flat — all nodes live in one list and group via this reference.
+    /// </summary>
+    public FactoryNode? Parent { get; set; }
 
+    /// <summary>An outpost/blueprint's own view (zoom/pan) when it is the focused scope.</summary>
     public double InnerZoom { get; set; } = 1.0;
     public double InnerPanX { get; set; }
     public double InnerPanY { get; set; }

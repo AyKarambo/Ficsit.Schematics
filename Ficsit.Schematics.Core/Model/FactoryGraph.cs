@@ -18,26 +18,14 @@ public sealed class FactoryGraph
         Connections.RemoveAll(c => c.From == node || c.To == node);
     }
 
-    /// <summary>All nodes in this scope and nested outpost scopes, depth-first.</summary>
-    public IEnumerable<FactoryNode> AllNodes()
-    {
-        foreach (var node in Nodes)
-        {
-            yield return node;
-            if (node.Children is null) continue;
-            foreach (var child in node.Children.AllNodes())
-                yield return child;
-        }
-    }
+    /// <summary>All nodes (the model is flat — outpost membership is via
+    /// <see cref="FactoryNode.Parent"/>, not nesting).</summary>
+    public IEnumerable<FactoryNode> AllNodes() => Nodes;
 
-    /// <summary>All connections in this scope and nested scopes.</summary>
-    public IEnumerable<NodeConnection> AllConnections()
-    {
-        foreach (var connection in Connections)
-            yield return connection;
-        foreach (var node in Nodes)
-            if (node.Children is not null)
-                foreach (var nested in node.Children.AllConnections())
-                    yield return nested;
-    }
+    /// <summary>All connections.</summary>
+    public IEnumerable<NodeConnection> AllConnections() => Connections;
+
+    /// <summary>Direct members of an outpost (or root-level nodes when <paramref name="outpost"/> is null).</summary>
+    public IEnumerable<FactoryNode> MembersOf(FactoryNode? outpost)
+        => Nodes.Where(n => n.Parent == outpost);
 }

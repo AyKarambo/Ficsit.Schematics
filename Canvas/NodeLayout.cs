@@ -86,36 +86,23 @@ public sealed class NodeLayout
 
         if (node.Kind is NodeKind.Outpost or NodeKind.Blueprint)
         {
-            var box = new RectF(x, y, SpecialtySize, SpecialtySize);
+            // A bracket box: its ports are the parts that cross its boundary (a connection
+            // with exactly one end inside it). Card-like so the icon sits between port columns.
+            var (inParts, outParts) = OutpostBoundaryParts(node, scope);
+            var boundaryPorts = Math.Max(inParts.Count, outParts.Count);
+            var boxHeight = Math.Max(SpecialtySize, boundaryPorts * (PortSize + PortGap) + PortGap);
+            var box = new RectF(x, y, CardWidth, boxHeight);
             var specialty = new NodeLayout
             {
                 Node = node,
                 Bounds = box,
-                ImageRect = box.Inflate(-4, -4),
+                ImageRect = new RectF(x + PortSize + 2, y + 2, CardWidth - 2 * (PortSize + 2), boxHeight - 4),
                 HasValueRow = false,
                 HasLimitRow = false,
             };
-            AddDynamicPorts(specialty, node, scope, box);
+            PlacePorts(specialty.Inputs, OrderParts(inParts, node.InputOrder), box.Left, box.Top, box.Height, isInput: true);
+            PlacePorts(specialty.Outputs, OrderParts(outParts, node.OutputOrder), box.Right - PortSize, box.Top, box.Height, isInput: false);
             return specialty;
-        }
-
-        // Outpost boundary node: a small badge carrying one part — Import provides it to the
-        // interior (output on the right edge), Export consumes it (input on the left edge).
-        if (node.Kind is NodeKind.Import or NodeKind.Export)
-        {
-            var box = new RectF(x, y, SpecialtySize, SpecialtySize);
-            var boundary = new NodeLayout
-            {
-                Node = node,
-                Bounds = box,
-                ImageRect = box.Inflate(-4, -4),
-                HasValueRow = false,
-                HasLimitRow = false,
-            };
-            var isImport = node.Kind == NodeKind.Import;
-            PlacePorts(isImport ? boundary.Outputs : boundary.Inputs, [node.Name],
-                isImport ? box.Right - PortSize : box.Left, box.Top, box.Height, isInput: !isImport);
-            return boundary;
         }
 
         List<string> inputParts = [];
@@ -202,6 +189,30 @@ public sealed class NodeLayout
         return result;
     }
 
+    /// <summary>Distinct parts crossing an outpost's boundary: inputs enter it (a connection
+    /// whose consumer is inside and producer is outside), outputs leave it (vice versa).</summary>
+    public static (List<string> InParts, List<string> OutParts) OutpostBoundaryParts(FactoryNode outpost, FactoryGraph graph)
+    {
+        var inParts = new List<string>();
+        var outParts = new List<string>();
+        foreach (var c in graph.Connections)
+        {
+            var fromInside = IsInside(c.From, outpost);
+            var toInside = IsInside(c.To, outpost);
+            if (toInside && !fromInside) { if (!inParts.Contains(c.Part)) inParts.Add(c.Part); }
+            else if (fromInside && !toInside) { if (!outParts.Contains(c.Part)) outParts.Add(c.Part); }
+        }
+        return (inParts, outParts);
+    }
+
+    /// <summary>True when <paramref name="node"/> is a descendant of <paramref name="outpost"/>.</summary>
+    public static bool IsInside(FactoryNode? node, FactoryNode outpost)
+    {
+        for (var p = node?.Parent; p is not null; p = p.Parent)
+            if (p == outpost) return true;
+        return false;
+    }
+
     private static void PlacePorts(List<PortInfo> target, List<string> parts, float x, float y, float areaHeight, bool isInput)
     {
         if (parts.Count == 0) return;
@@ -222,15 +233,6 @@ public sealed class NodeLayout
     {
         var inParts = scope.IncomingTo(node).Select(c => c.Part).Distinct().ToList();
         var outParts = scope.OutgoingFrom(node).Select(c => c.Part).Distinct().ToList();
-
-        // An outpost/blueprint's exterior ports also come from its interior boundary nodes
-        // (declared imports/exports), so a port shows even before it's wired from outside.
-        if (node.Kind is NodeKind.Outpost or NodeKind.Blueprint && node.Children is not null)
-            foreach (var child in node.Children.Nodes)
-            {
-                if (child.Kind == NodeKind.Import && !inParts.Contains(child.Name)) inParts.Add(child.Name);
-                else if (child.Kind == NodeKind.Export && !outParts.Contains(child.Name)) outParts.Add(child.Name);
-            }
 
         var acceptsInputs = node.Kind is not NodeKind.Outpost and not NodeKind.Blueprint
             ? node.StorageMode != StorageMode.Full || node.Kind != NodeKind.StorageContainer

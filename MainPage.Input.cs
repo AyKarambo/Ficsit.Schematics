@@ -120,7 +120,7 @@ public partial class MainPage
                 _state.Editor.Commands.Redo();
                 break;
             case Windows.System.VirtualKey.A when ctrl:
-                _state.SetSelection(_state.Editor.CurrentScope.Nodes);
+                _state.SetSelection(_state.Editor.VisibleNodes.ToList());
                 break;
             case Windows.System.VirtualKey.C when ctrl:
                 _state.Editor.Copy(_state.Selection.ToList());

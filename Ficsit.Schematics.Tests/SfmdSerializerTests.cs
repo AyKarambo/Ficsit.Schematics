@@ -107,33 +107,42 @@ public class SfmdSerializerTests
     }
 
     [Fact]
-    public void Outpost_boundary_node_kinds_roundtrip()
+    public void Outpost_membership_roundtrips_flat()
     {
+        // Flat model: outpost + member in one list, membership via Parent (serialized by index).
         var doc = new FactoryDocument();
-        var outpost = new FactoryNode { Name = "Outpost", Kind = NodeKind.Outpost, Children = new FactoryGraph() };
-        outpost.Children!.Nodes.Add(new FactoryNode { Name = "Iron Ore", Kind = NodeKind.Import });
-        outpost.Children!.Nodes.Add(new FactoryNode { Name = "Iron Ingot", Kind = NodeKind.Export });
+        var outpost = new FactoryNode { Name = "Outpost", Kind = NodeKind.Outpost };
+        var inner = new FactoryNode { Name = "Iron Ingot", Max = "2", Parent = outpost };
         doc.Root.Nodes.Add(outpost);
+        doc.Root.Nodes.Add(inner);
 
-        var inner = SfmdSerializer.Deserialize(SfmdSerializer.Serialize(doc)).Root.Nodes.Single().Children!.Nodes;
-        Assert.Equal(NodeKind.Import, inner.Single(n => n.Name == "Iron Ore").Kind);
-        Assert.Equal(NodeKind.Export, inner.Single(n => n.Name == "Iron Ingot").Kind);
+        var reloaded = SfmdSerializer.Deserialize(SfmdSerializer.Serialize(doc));
+        Assert.Equal(2, reloaded.Root.Nodes.Count);
+        var ro = reloaded.Root.Nodes.Single(n => n.Kind == NodeKind.Outpost);
+        var ri = reloaded.Root.Nodes.Single(n => n.Name == "Iron Ingot");
+        Assert.Same(ro, ri.Parent);
+        Assert.Equal("2", ri.Max);
     }
 
     [Fact]
-    public void Nested_outpost_children_roundtrip()
+    public void Legacy_nested_outpost_save_migrates_to_flat()
     {
-        var doc = new FactoryDocument();
-        var outpost = new FactoryNode { Name = "Outpost", Kind = NodeKind.Outpost, Children = new FactoryGraph() };
-        var inner = new FactoryNode { Name = "Iron Ingot", Max = "2" };
-        outpost.Children.Nodes.Add(inner);
-        doc.Root.Nodes.Add(outpost);
+        // Old format: an outpost carries a nested "Data" array with locally-indexed Inputs.
+        // It must flatten into one list, set Parent, and remap the connection.
+        const string json = """
+            {"Version":"1.0","Data":[{"Name":"Outpost","X":0,"Y":0,"Data":[{"Name":"Limestone","X":0,"Y":0,"Max":"60"},{"Name":"Fine Concrete","X":10,"Y":0,"Inputs":{"Limestone":[0]}}]}]}
+            """;
+        var doc = SfmdSerializer.Deserialize(json);
 
-        var reloaded = SfmdSerializer.Deserialize(SfmdSerializer.Serialize(doc));
-        var reloadedOutpost = Assert.Single(reloaded.Root.Nodes);
-        Assert.NotNull(reloadedOutpost.Children);
-        var reloadedInner = Assert.Single(reloadedOutpost.Children!.Nodes);
-        Assert.Equal("Iron Ingot", reloadedInner.Name);
-        Assert.Equal("2", reloadedInner.Max);
+        Assert.Equal(3, doc.Root.Nodes.Count); // outpost + 2 members, flattened
+        var outpost = doc.Root.Nodes.Single(n => n.Kind == NodeKind.Outpost);
+        var concrete = doc.Root.Nodes.Single(n => n.Name == "Fine Concrete");
+        var limestone = doc.Root.Nodes.Single(n => n.Name == "Limestone");
+        Assert.Same(outpost, concrete.Parent);
+        Assert.Same(outpost, limestone.Parent);
+        var conn = Assert.Single(doc.Root.Connections);
+        Assert.Same(limestone, conn.From);
+        Assert.Same(concrete, conn.To);
+        Assert.Equal("Limestone", conn.Part);
     }
 }

@@ -25,10 +25,6 @@ public sealed class FactoryCanvasDrawable(AppState state, IconStore icons, Numbe
     public RectF? RubberBand { get; set; }
     public (PointF Screen, string Text)? Tooltip { get; set; }
 
-    /// <summary>While a connection wire hovers an outpost/blueprint: its on-screen rect and
-    /// whether the pointer is over the left (input) half — drawn as two drop zones.</summary>
-    public (RectF Screen, bool LeftActive)? OutpostDropHint { get; set; }
-
     /// <summary>The resource marker a dragged extractor would snap to; drawn highlighted.</summary>
     public ResourceNodeInfo? SnapPreviewMarker { get; set; }
 
@@ -57,10 +53,11 @@ public sealed class FactoryCanvasDrawable(AppState state, IconStore icons, Numbe
             if (_layoutsDirty)
             {
                 _layouts.Clear();
-                var scope = state.Editor.CurrentScope;
+                var graph = state.Editor.Graph;
                 var mapCompact = MapActive;
-                foreach (var node in scope.Nodes)
-                    _layouts[node] = NodeLayout.Compute(node, state.Data, scope, mapCompact);
+                // Only the nodes in the current scope (members of the active outpost) are laid out.
+                foreach (var node in state.Editor.VisibleNodes)
+                    _layouts[node] = NodeLayout.Compute(node, state.Data, graph, mapCompact);
                 _layoutsDirty = false;
             }
             return _layouts;
@@ -72,6 +69,17 @@ public sealed class FactoryCanvasDrawable(AppState state, IconStore icons, Numbe
 
     public PointF WorldToScreen(PointF world)
         => new(world.X * Zoom + PanX, world.Y * Zoom + PanY);
+
+    /// <summary>The node that represents <paramref name="node"/> in the current scope: the node
+    /// itself if it's a direct member of the active outpost, the outpost box it lives inside if
+    /// it's deeper, or null if it's outside the current scope entirely.</summary>
+    public FactoryNode? VisibleRep(FactoryNode node)
+    {
+        var active = state.Editor.ActiveOutpost;
+        FactoryNode? cur = node;
+        while (cur is not null && cur.Parent != active) cur = cur.Parent;
+        return cur;
+    }
 
     public void Draw(ICanvas canvas, RectF dirtyRect)
     {
@@ -88,14 +96,15 @@ public sealed class FactoryCanvasDrawable(AppState state, IconStore icons, Numbe
         else
             DrawGrid(canvas, dirtyRect);
 
-        var scope = state.Editor.CurrentScope;
         var result = state.Editor.Result;
         var layouts = Layouts;
 
-        foreach (var connection in scope.Connections)
+        // Connections are flat; each end maps to its visible representative (the node itself
+        // or the outpost box it sits inside). Cross-boundary wires draw to the box.
+        foreach (var connection in state.Editor.Graph.Connections)
             DrawConnection(canvas, connection, layouts, result);
 
-        foreach (var node in scope.Nodes)
+        foreach (var node in state.Editor.VisibleNodes)
             if (layouts.TryGetValue(node, out var layout))
                 DrawNode(canvas, layout, result);
 
@@ -226,8 +235,11 @@ public sealed class FactoryCanvasDrawable(AppState state, IconStore icons, Numbe
         IReadOnlyDictionary<FactoryNode, NodeLayout> layouts,
         SolveResult result)
     {
-        if (!layouts.TryGetValue(connection.From, out var fromLayout)
-            || !layouts.TryGetValue(connection.To, out var toLayout))
+        var fromNode = VisibleRep(connection.From);
+        var toNode = VisibleRep(connection.To);
+        if (fromNode is null || toNode is null || fromNode == toNode) return;
+        if (!layouts.TryGetValue(fromNode, out var fromLayout)
+            || !layouts.TryGetValue(toNode, out var toLayout))
             return;
 
         var fromPort = fromLayout.Outputs.FirstOrDefault(p => p.Part == connection.Part)
@@ -287,8 +299,11 @@ public sealed class FactoryCanvasDrawable(AppState state, IconStore icons, Numbe
     public RectF ConnectionLabelRect(NodeConnection connection)
     {
         var layouts = Layouts;
-        if (!layouts.TryGetValue(connection.From, out var fromLayout)
-            || !layouts.TryGetValue(connection.To, out var toLayout))
+        var fromNode = VisibleRep(connection.From);
+        var toNode = VisibleRep(connection.To);
+        if (fromNode is null || toNode is null || fromNode == toNode
+            || !layouts.TryGetValue(fromNode, out var fromLayout)
+            || !layouts.TryGetValue(toNode, out var toLayout))
             return RectF.Zero;
         var start = new PointF(fromLayout.Bounds.Right, fromLayout.Bounds.Center.Y);
         var end = new PointF(toLayout.Bounds.Left, toLayout.Bounds.Center.Y);
@@ -328,25 +343,6 @@ public sealed class FactoryCanvasDrawable(AppState state, IconStore icons, Numbe
             if (icon is not null) canvas.DrawImage(icon, layout.ImageRect.X, layout.ImageRect.Y, layout.ImageRect.Width, layout.ImageRect.Height);
             // Part icons on the boundary ports, same as machine cards, so it's clear what
             // flows in (left) and out (right).
-            foreach (var port in layout.Inputs)
-                DrawPort(canvas, layout, port, nodeResult);
-            foreach (var port in layout.Outputs)
-                DrawPort(canvas, layout, port, nodeResult);
-            DrawTitle(canvas, layout, node);
-            return;
-        }
-
-        // Outpost boundary badge: the part icon plus its single boundary port.
-        if (node.Kind is NodeKind.Import or NodeKind.Export)
-        {
-            canvas.FillColor = Theme.CardBackground;
-            canvas.FillRoundedRectangle(layout.Bounds, corner);
-            canvas.StrokeColor = selected ? Theme.SelectedBorder : Theme.CardBorder;
-            canvas.StrokeSize = selected ? 2f : 1f;
-            canvas.DrawRoundedRectangle(layout.Bounds, corner);
-            var partIcon = icons.GetImage(node.Name);
-            if (partIcon is not null)
-                canvas.DrawImage(partIcon, layout.ImageRect.X, layout.ImageRect.Y, layout.ImageRect.Width, layout.ImageRect.Height);
             foreach (var port in layout.Inputs)
                 DrawPort(canvas, layout, port, nodeResult);
             foreach (var port in layout.Outputs)
@@ -652,27 +648,6 @@ public sealed class FactoryCanvasDrawable(AppState state, IconStore icons, Numbe
 
     private void DrawAdorners(ICanvas canvas)
     {
-        if (OutpostDropHint is { } hint)
-        {
-            var r = hint.Screen;
-            var mid = r.X + r.Width / 2;
-            var left = new RectF(r.X, r.Y, r.Width / 2, r.Height);
-            var right = new RectF(mid, r.Y, r.Width / 2, r.Height);
-            // Both halves tinted; the side the pointer is over is emphasized.
-            canvas.FillColor = Theme.SelectedBorder.WithAlpha(hint.LeftActive ? 0.40f : 0.12f);
-            canvas.FillRectangle(left);
-            canvas.FillColor = Theme.SelectedBorder.WithAlpha(hint.LeftActive ? 0.12f : 0.40f);
-            canvas.FillRectangle(right);
-            canvas.StrokeColor = Theme.SelectedBorder;
-            canvas.StrokeSize = 1f;
-            canvas.DrawRectangle(r);
-            canvas.DrawLine(mid, r.Y, mid, r.Bottom);
-            canvas.FontColor = Theme.SelectedBorder;
-            canvas.FontSize = 9f;
-            canvas.DrawString("in", left, HorizontalAlignment.Center, VerticalAlignment.Bottom);
-            canvas.DrawString("out", right, HorizontalAlignment.Center, VerticalAlignment.Bottom);
-        }
-
         if (PendingWire is { } wire)
         {
             canvas.StrokeColor = Theme.SelectedBorder;
