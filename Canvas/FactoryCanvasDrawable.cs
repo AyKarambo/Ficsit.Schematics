@@ -32,6 +32,13 @@ public sealed class FactoryCanvasDrawable(AppState state, IconStore icons, Numbe
     /// a short bar between ports.</summary>
     public (float X, float Y, float Width)? PortInsertLine { get; set; }
 
+    /// <summary>While dragging a wire inside an outpost toward an edge: true = left (make an
+    /// input boundary), false = right (output), null = no edge hint. Drawn as a rail highlight.</summary>
+    public bool? EdgeDropZone { get; set; }
+
+    /// <summary>Last drawn viewport width (screen px), for edge-zone hit-testing.</summary>
+    public float ViewportWidth => _viewport.Width;
+
     /// <summary>True when the world map underlay and resource markers are active (root scope).</summary>
     public bool MapActive => state.Settings.ShowMap && state.Editor.ScopePath.Count == 0;
 
@@ -689,6 +696,23 @@ public sealed class FactoryCanvasDrawable(AppState state, IconStore icons, Numbe
 
     private void DrawAdorners(ICanvas canvas)
     {
+        if (EdgeDropZone is { } left)
+        {
+            const float edgeBandW = 90f;
+            var edgeBand = left
+                ? new RectF(0, 0, edgeBandW, _viewport.Height)
+                : new RectF(_viewport.Width - edgeBandW, 0, edgeBandW, _viewport.Height);
+            canvas.FillColor = Theme.SelectedBorder.WithAlpha(0.18f);
+            canvas.FillRectangle(edgeBand);
+            // Label sits near the top of the rail so it never collides with the released wire.
+            var labelRect = new RectF(edgeBand.X, 80f, edgeBand.Width, 24f);
+            canvas.FontColor = Theme.SelectedBorder;
+            canvas.FontSize = 12f;
+            canvas.Font = Microsoft.Maui.Graphics.Font.DefaultBold;
+            canvas.DrawString(left ? "+ input" : "+ output", labelRect,
+                HorizontalAlignment.Center, VerticalAlignment.Center);
+        }
+
         if (PendingWire is { } wire)
         {
             canvas.StrokeColor = Theme.SelectedBorder;

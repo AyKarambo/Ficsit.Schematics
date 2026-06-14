@@ -49,6 +49,21 @@ public sealed class CanvasController(AppState state, FactoryCanvasDrawable drawa
 
     private float DragThreshold => Math.Max(2, state.Settings.DragSensitivity / 4f);
 
+    /// <summary>Screen margin at the left/right edges that, inside an outpost, turns a port-drag
+    /// release into a new boundary handle (left = input, right = output).</summary>
+    private const float EdgeZonePx = 90f;
+
+    /// <summary>Which edge a drag is over for a boundary drop: true = left/input, false =
+    /// right/output, null = none. Only inside an outpost, dragging a concrete machine port.</summary>
+    private bool? EdgeZoneFor(PointF screen)
+    {
+        if (state.Editor.ActiveOutpost is null || _pressPort is null
+            || _pressPort.Part == "AnyPart" || _dragOutNode is not null) return null;
+        if (_pressPort.IsInput && screen.X <= EdgeZonePx) return true;
+        if (!_pressPort.IsInput && screen.X >= drawable.ViewportWidth - EdgeZonePx) return false;
+        return null;
+    }
+
     /// <summary>True while a pan/drag/connect/rubber-band gesture is in flight. Lets the host
     /// skip the per-move status recompute (full node walk) until the gesture ends.</summary>
     public bool IsInteracting => _mode is Mode.Pan or Mode.DragNodes or Mode.Connect or Mode.RubberBand;
@@ -141,6 +156,7 @@ public sealed class CanvasController(AppState state, FactoryCanvasDrawable drawa
                     _reorderActive = true;
                     drawable.PortInsertLine = insertLine;
                     drawable.PendingWire = null;
+                    drawable.EdgeDropZone = null;
                 }
                 else
                 {
@@ -151,6 +167,7 @@ public sealed class CanvasController(AppState state, FactoryCanvasDrawable drawa
                         ? drawable.WorldToScreen(anchorLayout.PortAnchor(_pressPort))
                         : _pressScreen;
                     drawable.PendingWire = (anchor, screen);
+                    drawable.EdgeDropZone = EdgeZoneFor(screen);
                 }
                 Invalidate?.Invoke();
                 break;
@@ -191,6 +208,7 @@ public sealed class CanvasController(AppState state, FactoryCanvasDrawable drawa
             case Mode.Connect:
                 drawable.PendingWire = null;
                 drawable.PortInsertLine = null;
+                drawable.EdgeDropZone = null;
                 if (_reorderActive)
                     CommitReorder();
                 else if (_dragOutNode is not null)
@@ -338,6 +356,18 @@ public sealed class CanvasController(AppState state, FactoryCanvasDrawable drawa
 
         if (targetNode is null)
         {
+            // Inside an outpost, releasing near an edge declares a boundary: a machine input on
+            // the left rail becomes an Import (fed from outside), an output on the right an Export.
+            if (EdgeZoneFor(screen) is { } left && state.Editor.ActiveOutpost is { } outpost)
+            {
+                state.Editor.Commands.BeginGroup(left ? "Add import" : "Add export");
+                var handle = state.Editor.EnsureBoundary(outpost, _pressPort.Part, isImport: left);
+                if (left) state.Editor.Connect(handle, _pressPort.Part, _pressNode);
+                else state.Editor.Connect(_pressNode, _pressPort.Part, handle);
+                state.Editor.Commands.EndGroup();
+                drawable.InvalidateLayouts();
+                return;
+            }
             // Dropped on empty canvas: offer compatible recipes for this port.
             OpenChooserForPort?.Invoke(
                 new PortDragContext(_pressNode, _pressPort.Part, !_pressPort.IsInput), screen);
@@ -748,6 +778,7 @@ public sealed class CanvasController(AppState state, FactoryCanvasDrawable drawa
         _reorderActive = false;
         drawable.PendingWire = null;
         drawable.PortInsertLine = null;
+        drawable.EdgeDropZone = null;
         drawable.SnapPreviewMarker = null;
         drawable.RubberBand = null;
         Invalidate?.Invoke();
