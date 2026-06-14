@@ -7,6 +7,6 @@ public sealed class AlienPowerAugmenterRecipes : RecipeModule
 
     protected override IReadOnlyList<Recipe> Recipes =>
     [
-        new(300, "Alien Power Augmenter", "12", "9-2", [In("Alien Power Matrix", 1)], IgnoreInputMultiplier: true),
+        new(300, "Alien Power Augmenter", Batch: "12", Tier: "9-2", [In("Alien Power Matrix", 1)], IgnoreInputMultiplier: true),
     ];
 }

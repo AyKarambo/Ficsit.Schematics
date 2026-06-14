@@ -61,8 +61,13 @@ are authored as grouped, strongly-typed C# tables under
 - `Recipes/<Machine>Recipes.cs` — one `RecipeModule` per machine; rows use `In(...)` /
   `Out(...)` helpers. Adding a recipe = adding one line.
 - `PartsCatalog.cs` — every part as a one-line `Part(...)` row.
-- `MachinesCatalog.cs` — machines + multi-machine families (variants, capacities).
+- `Machines/<Category>Machines.cs` — machines grouped by category; each `MachineGroup`
+  keeps a multi-machine **family** (marks / purity / belt capacities) next to its machine.
 - `RecipeModule` / `PartModule` / `MachineModule` define the row types and helpers.
+
+A **multi-machine family** (`MultiMachineDefinition`) is one building with selectable
+options: marks (Miner Mk.1/2/3), resource purity, belt marks or upload rates, plus node
+defaults. Recipes target the family name; `GameDatabase.MultiMachineFor(name)` resolves it.
 
 Each row carries a sort key that restores canonical game order.
 `GameDataCatalog.BuildDatabase()` assembles the immutable `GameDatabase` used everywhere.

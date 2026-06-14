@@ -7,6 +7,6 @@ public sealed class GeothermalGeneratorRecipes : RecipeModule
 
     protected override IReadOnlyList<Recipe> Recipes =>
     [
-        new(215, "Geothermal Generator", "0", "6-1", [], IgnoreInputMultiplier: true),
+        new(215, "Geothermal Generator", Batch: "0", Tier: "6-1", [], IgnoreInputMultiplier: true),
     ];
 }

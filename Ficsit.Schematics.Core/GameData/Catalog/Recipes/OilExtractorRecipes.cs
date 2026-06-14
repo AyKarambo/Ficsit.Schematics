@@ -7,6 +7,6 @@ public sealed class OilExtractorRecipes : RecipeModule
 
     protected override IReadOnlyList<Recipe> Recipes =>
     [
-        new(10, "Crude Oil", "1", "5-2", [Out("Crude Oil", 2)]),
+        new(10, "Crude Oil", Batch: "1", Tier: "5-2", [Out("Crude Oil", 2)]),
     ];
 }

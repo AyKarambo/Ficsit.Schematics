@@ -7,6 +7,6 @@ public sealed class ResourceWellPressurizerRecipes : RecipeModule
 
     protected override IReadOnlyList<Recipe> Recipes =>
     [
-        new(265, "Resource Well Pressurizer", "1", "8-3", []),
+        new(265, "Resource Well Pressurizer", Batch: "1", Tier: "8-3", []),
     ];
 }

@@ -7,8 +7,8 @@ public sealed class CoalPoweredGeneratorRecipes : RecipeModule
 
     protected override IReadOnlyList<Recipe> Recipes =>
     [
-        new(105, "Coal Generator", "4", "3-1", [In("Coal", 1), In("Water", 3)], IgnoreInputMultiplier: true),
-        new(133, "Petroleum Coke Generator", "12/5", "5-2", [In("Petroleum Coke", 1), In("Water", "9/5")], IgnoreInputMultiplier: true),
-        new(153, "Compacted Coal Generator", "42/5", "5-4", [In("Compacted Coal", 1), In("Water", "63/10")], IgnoreInputMultiplier: true),
+        new(105, "Coal Generator",           Batch: "4",    Tier: "3-1", [In("Coal", 1), In("Water", 3)], IgnoreInputMultiplier: true),
+        new(133, "Petroleum Coke Generator", Batch: "12/5", Tier: "5-2", [In("Petroleum Coke", 1), In("Water", "9/5")], IgnoreInputMultiplier: true),
+        new(153, "Compacted Coal Generator", Batch: "42/5", Tier: "5-4", [In("Compacted Coal", 1), In("Water", "63/10")], IgnoreInputMultiplier: true),
     ];
 }
