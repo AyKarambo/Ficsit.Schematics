@@ -318,6 +318,20 @@ public sealed class CanvasController(AppState state, FactoryCanvasDrawable drawa
             return;
         }
 
+        // Dropping a wire on an outpost box crosses the boundary: open the outpost and offer
+        // to add the matching machine inside it (wired across — the new node inherits the
+        // outpost as its Parent via AddNode). Dragging a producer's output filters to consumers
+        // inside; dragging a consumer's input filters to producers inside.
+        if (targetNode is not null && targetNode != _pressNode && _pressPort.Part != "AnyPart"
+            && targetNode.Kind is NodeKind.Outpost or NodeKind.Blueprint
+            && _pressNode.Kind is not (NodeKind.Outpost or NodeKind.Blueprint))
+        {
+            state.Editor.EnterOutpost(targetNode);
+            OpenChooserForPort?.Invoke(
+                new PortDragContext(_pressNode, _pressPort.Part, !_pressPort.IsInput), screen);
+            return;
+        }
+
         if (targetNode is null)
         {
             // Dropped on empty canvas: offer compatible recipes for this port.
