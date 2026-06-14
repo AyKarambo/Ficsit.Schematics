@@ -177,6 +177,16 @@ public partial class MainPage
         _state.SaveSettings();
     }
 
+    /// <summary>Reflects the persisted tier cap onto the Auto-Plan picker (e.g. after a save
+    /// import sets it) without firing the change handler.</summary>
+    private void SyncTierPickerFromSettings()
+    {
+        if (!_planPanelInitialized) return;
+        _tierSeeding = true;
+        PlanMaxTierPicker.SelectedIndex = TierIndexFromCap(_state.Settings.PlannerMaxTierPhase);
+        _tierSeeding = false;
+    }
+
     private void ApplyAutoPlanStrings()
     {
         ToolTipProperties.SetText(AutoPlanButton, "Auto-Plan a factory");

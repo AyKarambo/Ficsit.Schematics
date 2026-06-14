@@ -69,25 +69,21 @@ public class FromSaveTests
     }
 
     [Fact]
-    public void Determine_unlocked_gates_standard_by_phase_and_alternates_by_hard_drive()
+    public void Determine_unlocked_reports_reached_phase_and_unlocked_alternates()
     {
         var data = TestData.Database;
         // Reached milestone 3-2; one hard-drive alternate (Bolted Frame) unlocked.
         var stems = new List<string> { "StartingRecipes", "1-1", "2-1", "3-2", "Alternate_BoltedFrame" };
 
-        var (enabled, maxPhase, alternates, _) = SchematicRecipeMap.DetermineUnlocked(data, stems);
+        var (maxPhase, unlockedAlternates, unrecognized) = SchematicRecipeMap.DetermineUnlocked(data, stems);
 
+        // Max reached tier (drives the planner's tier cap for standard recipes).
         Assert.Equal(3, maxPhase);
-        Assert.Equal(1, alternates);
-
-        // Standard recipes follow the reached phase exactly.
-        foreach (var recipe in data.Document.Recipes.Where(r => !r.Alternate))
-            Assert.Equal(recipe.Tier.Phase <= 3, enabled.Contains(recipe.Name));
-
+        Assert.Equal(0, unrecognized);
         // Alternates: only the unlocked one is on.
-        Assert.Contains("Bolted Frame", enabled);
+        Assert.Contains("Bolted Frame", unlockedAlternates);
         var lockedAlternate = data.Document.Recipes.First(r => r.Alternate && r.Name != "Bolted Frame").Name;
-        Assert.DoesNotContain(lockedAlternate, enabled);
+        Assert.DoesNotContain(lockedAlternate, unlockedAlternates);
     }
 
     [Fact]

@@ -280,19 +280,23 @@ public partial class MainPage
     private async Task<string> ApplyUnlockedRecipesFromSaveAsync(string path)
     {
         var schematics = await Task.Run(() => SatisfactorySaveReader.ReadUnlockedSchematics(path));
-        var (enabled, maxPhase, alternates, unrecognized) = SchematicRecipeMap.DetermineUnlocked(Data, schematics);
+        var (maxPhase, unlockedAlternates, unrecognized) = SchematicRecipeMap.DetermineUnlocked(Data, schematics);
 
-        // The save's progression is authoritative: disable every recipe it hasn't unlocked
-        // (standard recipes above the reached tier, and every not-yet-found hard-drive alternate).
+        // Standard recipes are gated by the planner's progression tier cap; alternates are gated
+        // individually (disable every hard-drive alternate the save hasn't unlocked). Using the
+        // tier cap for standard recipes keeps it a single lever the user can still raise to plan
+        // ahead, rather than baking the gate into the per-recipe disabled set.
+        _state.Settings.PlannerMaxTierPhase = maxPhase;
         DisabledRecipes.Clear();
         foreach (var recipe in Data.Document.Recipes)
-            if (!enabled.Contains(recipe.Name))
+            if (recipe.Alternate && !unlockedAlternates.Contains(recipe.Name))
                 DisabledRecipes.Add(recipe.Name);
-        PersistDisabledRecipes();
+        PersistDisabledRecipes(); // also persists the tier cap via SaveSettings
         SyncRecipeListChecks();
+        SyncTierPickerFromSettings();
 
-        var message = $"Set recipes from the save: {enabled.Count} unlocked "
-            + $"(standard recipes up to Tier {maxPhase}, plus {alternates} alternate recipe(s)).";
+        var message = $"Set recipes from the save: standard recipes up to Tier {maxPhase}, "
+            + $"plus {unlockedAlternates.Count} unlocked alternate recipe(s).";
         if (unrecognized > 0)
             message += $" {unrecognized} alternate schematic(s) couldn't be matched — toggle by hand if needed.";
         return message;

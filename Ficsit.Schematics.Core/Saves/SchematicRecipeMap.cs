@@ -73,12 +73,12 @@ public static class SchematicRecipeMap
         ["RadioControlUnit1"] = "Radio Connection Unit",
     };
 
-    /// <summary>The recipes a save has unlocked, derived from all its purchased schematics:
-    /// standard recipes are gated by the highest reached progression phase (milestone
-    /// schematics "P-M"); alternate recipes are gated by their specific hard-drive schematic.
-    /// MAM-unlocked recipes don't map to a milestone, so the phase gate keeps them on within
-    /// the reached phase rather than wrongly disabling them.</summary>
-    public static (HashSet<string> EnabledRecipes, int MaxPhase, int UnlockedAlternates, int UnrecognizedAlternates)
+    /// <summary>What a save has unlocked, derived from all its purchased schematics:
+    /// the highest reached progression tier (the milestone schematics "P-M", used to set the
+    /// planner's tier cap so standard recipes are gated by progression) and the specific
+    /// unlocked hard-drive alternate recipes. MAM-unlocked recipes don't map to a milestone, so
+    /// the tier cap keeps them on within the reached tier rather than wrongly disabling them.</summary>
+    public static (int MaxPhase, HashSet<string> UnlockedAlternates, int UnrecognizedAlternates)
         DetermineUnlocked(GameDatabase data, IEnumerable<string> schematicStems)
     {
         var maxPhase = 0;
@@ -92,20 +92,7 @@ public static class SchematicRecipeMap
         }
 
         var (unlockedAlternates, unrecognized) = Match(data, alternateStems);
-
-        var enabled = new HashSet<string>(StringComparer.Ordinal);
-        foreach (var recipe in data.Document.Recipes)
-        {
-            if (recipe.Alternate)
-            {
-                if (unlockedAlternates.Contains(recipe.Name)) enabled.Add(recipe.Name);
-            }
-            else if (recipe.Tier.Phase <= maxPhase)
-            {
-                enabled.Add(recipe.Name);
-            }
-        }
-        return (enabled, maxPhase, unlockedAlternates.Count, unrecognized.Count);
+        return (maxPhase, unlockedAlternates, unrecognized.Count);
     }
 
     /// <summary>True for a milestone schematic stem like "3-2" (all digits around one dash).</summary>
