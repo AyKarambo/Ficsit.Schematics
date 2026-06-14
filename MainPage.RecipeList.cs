@@ -247,36 +247,51 @@ public partial class MainPage
     {
         try
         {
-            var savType = new FilePickerFileType(new Dictionary<DevicePlatform, IEnumerable<string>>
-            {
-                [DevicePlatform.WinUI] = [".sav"],
-            });
-            var picked = await FilePicker.Default.PickAsync(new PickOptions
-            {
-                PickerTitle = "Satisfactory save (.sav)",
-                FileTypes = savType,
-            });
+            var picked = await PickSatisfactorySaveAsync();
             if (picked is null) return;
-
-            var stems = await Task.Run(() => SatisfactorySaveReader.ReadUnlockedAlternateSchematics(picked.FullPath));
-            var (unlocked, unrecognized) = SchematicRecipeMap.Match(Data, stems);
-
-            // Standard recipes stay on; disable every alternate the save has NOT unlocked.
-            DisabledRecipes.Clear();
-            foreach (var recipe in Data.Document.Recipes)
-                if (recipe.Alternate && !unlocked.Contains(recipe.Name))
-                    DisabledRecipes.Add(recipe.Name);
-            PersistDisabledRecipes();
-            SyncRecipeListChecks();
-
-            var message = $"Enabled {unlocked.Count} unlocked alternate recipe(s) from the save; standard recipes stay on.";
-            if (unrecognized.Count > 0)
-                message += $"\n{unrecognized.Count} unlocked schematic(s) couldn't be matched to a recipe — toggle those by hand if needed.";
+            var message = await ApplyUnlockedRecipesFromSaveAsync(picked.FullPath);
             await DisplayAlertAsync("From save", message, "OK");
         }
         catch (Exception ex)
         {
             await DisplayAlertAsync("From save", "Couldn't read that save: " + ex.Message, "OK");
         }
+    }
+
+    /// <summary>The Satisfactory <c>.sav</c> file picker, shared by "From save" and map import.</summary>
+    internal static Task<FileResult?> PickSatisfactorySaveAsync()
+    {
+        var savType = new FilePickerFileType(new Dictionary<DevicePlatform, IEnumerable<string>>
+        {
+            [DevicePlatform.WinUI] = [".sav"],
+        });
+        return FilePicker.Default.PickAsync(new PickOptions
+        {
+            PickerTitle = "Satisfactory save (.sav)",
+            FileTypes = savType,
+        });
+    }
+
+    /// <summary>
+    /// Reads the save's unlocked alternate schematics and enables exactly those (standard
+    /// recipes stay on); returns a human summary. Shared by the recipe list's "From save"
+    /// button and the Settings map import.
+    /// </summary>
+    private async Task<string> ApplyUnlockedRecipesFromSaveAsync(string path)
+    {
+        var stems = await Task.Run(() => SatisfactorySaveReader.ReadUnlockedAlternateSchematics(path));
+        var (unlocked, unrecognized) = SchematicRecipeMap.Match(Data, stems);
+
+        DisabledRecipes.Clear();
+        foreach (var recipe in Data.Document.Recipes)
+            if (recipe.Alternate && !unlocked.Contains(recipe.Name))
+                DisabledRecipes.Add(recipe.Name);
+        PersistDisabledRecipes();
+        SyncRecipeListChecks();
+
+        var message = $"Enabled {unlocked.Count} unlocked alternate recipe(s); standard recipes stay on.";
+        if (unrecognized.Count > 0)
+            message += $" {unrecognized.Count} unlocked schematic(s) couldn't be matched — toggle by hand if needed.";
+        return message;
     }
 }

@@ -48,7 +48,6 @@ public static class SatisfactorySaveReader
     // ------------------------------------------------- unlocked alternates
 
     private const string PurchasedSchematicsProperty = "mPurchasedSchematics";
-    private const string AlternatePrefix = "Schematic_Alternate_";
 
     public static IReadOnlyList<string> ReadUnlockedAlternateSchematics(string filePath)
         => ReadUnlockedAlternateSchematics(File.ReadAllBytes(filePath));
@@ -72,42 +71,56 @@ public static class SatisfactorySaveReader
 
         var marker = Encoding.ASCII.GetBytes(PurchasedSchematicsProperty);
         foreach (var at in FindAll(body, marker))
-        {
-            // Validate it's the FString property name: int32 length (= len + 1) precedes it,
-            // and it is null-terminated. (Mirrors ScanResourceOverrides' guards.)
-            if (at < 4) continue;
-            if (BitConverter.ToInt32(body, at - 4) != marker.Length + 1) continue;
-            if (at + marker.Length >= body.Length || body[at + marker.Length] != 0) continue;
-
+            // Walk the array from every occurrence and union the alternates. The real array
+            // yields all of them; an incidental reference elsewhere yields ~nothing (the
+            // walk's gap check stops it quickly). No structural validation — the walk itself
+            // is the filter, so we're robust to FString/FName framing differences.
             CollectAlternateStems(body, at, stems, seen);
-            break; // exactly one occurrence in practice
-        }
         return stems;
     }
 
-    /// <summary>Walks forward from the property over the contiguous array, collecting the stem
-    /// after each <c>Schematic_Alternate_</c> token. Stops once the entries stop appearing
-    /// (a large gap = the array ended and other properties follow).</summary>
+    /// <summary>Walks the contiguous purchased-schematics array by each entry's asset path
+    /// (every entry starts <c>/Game/FactoryGame/Schematics/</c> — milestones, tutorials, AWESOME
+    /// shop customizers and hard-drive alternates alike), collecting the
+    /// <c>Schematic_Alternate_</c> stems. Walking the path (not the class name) is what keeps
+    /// the scan going across the long runs of non-"Schematic_"-named customizer entries
+    /// interleaved in the array; the first non-schematic <c>/Game</c> ref marks the array end.</summary>
     private static void CollectAlternateStems(byte[] body, int from, List<string> stems, HashSet<string> seen)
     {
-        var token = Encoding.ASCII.GetBytes(AlternatePrefix);
-        var hardEnd = Math.Min(body.Length, from + 256 * 1024);
+        const string schematicsRoot = "/Game/FactoryGame/Schematics/";
+        const string alt = "Schematic_Alternate_";
+        var token = Encoding.ASCII.GetBytes("/Game/");
+        var hardEnd = Math.Min(body.Length, from + 4 * 1024 * 1024);
         var pos = from;
         var lastHit = from;
         while (pos < hardEnd)
         {
             var idx = IndexOf(body, token, pos, hardEnd);
-            if (idx < 0 || idx - lastHit > 4096) break; // array ended; later refs aren't purchased
-            var start = idx + token.Length;
-            var end = start;
-            while (end < body.Length && (char.IsLetterOrDigit((char)body[end]) || body[end] == '_')) end++;
-            var stem = Encoding.ASCII.GetString(body, start, end - start);
-            if (stem.EndsWith("_C", StringComparison.Ordinal)) stem = stem[..^2]; // class-name copy
-            if (stem.Length > 0 && seen.Add(stem)) stems.Add(stem);
-            lastHit = idx;
+            if (idx < 0 || idx - lastHit > 8192) break; // a big gap = the array ended
+
+            var end = idx;
+            while (end < body.Length && IsPathByte(body[end])) end++;
+            var path = Encoding.ASCII.GetString(body, idx, end - idx);
             pos = end;
+
+            // The purchased array holds only schematic object refs; the first /Game ref that
+            // isn't a schematic path marks the boundary.
+            if (!path.StartsWith(schematicsRoot, StringComparison.Ordinal)) break;
+            lastHit = idx;
+
+            var a = path.IndexOf(alt, StringComparison.Ordinal);
+            if (a < 0) continue;
+            var stemStart = a + alt.Length;
+            var dot = path.IndexOf('.', stemStart);
+            var stem = (dot >= 0 ? path[stemStart..dot] : path[stemStart..]);
+            if (stem.EndsWith("_C", StringComparison.Ordinal)) stem = stem[..^2];
+            if (stem.Length > 0 && seen.Add(stem)) stems.Add(stem);
         }
     }
+
+    private static bool IsPathByte(byte b)
+        => b is >= (byte)'A' and <= (byte)'Z' or >= (byte)'a' and <= (byte)'z'
+            or >= (byte)'0' and <= (byte)'9' or (byte)'/' or (byte)'_' or (byte)'-' or (byte)'.';
 
     private static int IndexOf(byte[] haystack, byte[] needle, int start, int end)
     {

@@ -42,6 +42,33 @@ public class FromSaveTests
     }
 
     [Fact]
+    public void Walks_past_non_schematic_named_entries_to_reach_alternates()
+    {
+        // The purchased array interleaves AWESOME-shop customizer entries (named CBG_*, not
+        // Schematic_*) between alternates. The walk must not stop at that run — it nearly did,
+        // which is why a real save reported "0 alternates".
+        var body = BuildBody(
+            "/Game/FactoryGame/Schematics/Alternate/Schematic_Alternate_BoltedFrame.Schematic_Alternate_BoltedFrame_C",
+            "/Game/FactoryGame/Schematics/ResourceSink/Customizer_Background/CBG_Stairs_Concrete.CBG_Stairs_Concrete_C",
+            "/Game/FactoryGame/Schematics/ResourceSink/Customizer_Background/CBG_Foundations.CBG_Foundations_C",
+            "/Game/FactoryGame/Schematics/Alternate/Schematic_Alternate_Screw.Schematic_Alternate_Screw_C");
+
+        var stems = SatisfactorySaveReader.ReadAlternateStemsFromBody(body);
+
+        Assert.Contains("BoltedFrame", stems);
+        Assert.Contains("Screw", stems); // reached despite the customizer entries in between
+        Assert.Equal(2, stems.Count);
+    }
+
+    [Fact]
+    public void Cast_screw_stem_maps_to_the_recipe()
+    {
+        // The user's reported case: a save with Cast Screw unlocked (stem "Screw").
+        var (unlocked, _) = SchematicRecipeMap.Match(TestData.Database, ["Screw"]);
+        Assert.Contains("Cast Screw", unlocked);
+    }
+
+    [Fact]
     public void Matches_most_alternates_by_token_set()
     {
         var data = TestData.Database;

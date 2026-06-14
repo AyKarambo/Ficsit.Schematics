@@ -24,8 +24,10 @@ public static class SchematicRecipeMap
     /// </summary>
     private static readonly Dictionary<string, string> Overrides = new(StringComparer.OrdinalIgnoreCase)
     {
+        // Word-swap names the token matcher already gets, kept here for clarity / safety.
         ["SteelBeam_Aluminum"] = "Aluminum Beam",
         ["SteelPipe_Iron"] = "Iron Pipe",
+        ["SteelBeam_Molded"] = "Molded Beam",
         ["SteelCastedPlate"] = "Steel Cast Plate",
         ["AILimiter_Plastic"] = "Plastic AI Limiter",
         ["ElectroAluminumScrap"] = "Electrode Aluminum Scrap",
@@ -36,6 +38,39 @@ public static class SchematicRecipeMap
         ["HighSpeedConnector"] = "Silicon High-Speed Connector",
         ["HighSpeedWiring"] = "Automated Speed Wiring",
         ["Gunpowder1"] = "Fine Black Powder",
+        ["Quartz_Fused"] = "Fused Quartz Crystal",
+        ["Quartz_Purified"] = "Quartz Purification",
+        ["CrystalOscillator"] = "Insulated Crystal Oscillator",
+        ["OCSupercomputer"] = "OC Supercomputer",
+
+        // Numbered / internal-name variants (verified against the standard 1.x naming;
+        // every target is checked against the catalog at runtime, so a wrong entry is a
+        // no-op rather than a mis-enable).
+        ["Cable1"] = "Insulated Cable",
+        ["Cable2"] = "Quickwire Cable",
+        ["Wire1"] = "Iron Wire",
+        ["Wire2"] = "Caterium Wire",
+        ["Coal1"] = "Charcoal",
+        ["Coal2"] = "Biocoal",
+        ["Computer1"] = "Crystal Computer",
+        ["Computer2"] = "Caterium Computer",
+        ["CircuitBoard1"] = "Silicon Circuit Board",
+        ["CircuitBoard2"] = "Caterium Circuit Board",
+        ["IngotIron"] = "Iron Alloy Ingot",
+        ["IngotSteel1"] = "Solid Steel Ingot",
+        ["IngotSteel2"] = "Compacted Steel Ingot",
+        ["ReinforcedIronPlate1"] = "Bolted Iron Plate",
+        ["ReinforcedIronPlate2"] = "Stitched Iron Plate",
+        ["ModularFrame"] = "Steeled Frame",
+        ["HeavyModularFrame"] = "Heavy Encased Frame",
+        ["Screw"] = "Cast Screw",
+        ["Screw2"] = "Steel Screw",
+        ["Rotor"] = "Steel Rotor",
+        ["Stator"] = "Quickwire Stator",
+        ["Motor1"] = "Rigor Motor",
+        ["Silica"] = "Cheap Silica",
+        ["Concrete"] = "Fine Concrete",
+        ["RadioControlUnit1"] = "Radio Connection Unit",
     };
 
     /// <summary>The unlocked alternate recipe names and any stems that couldn't be matched.</summary>

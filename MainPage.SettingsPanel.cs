@@ -151,6 +151,12 @@ public partial class MainPage
             _state.SaveSettings();
             UpdateMapButton();
             Canvas.Invalidate();
+
+            // Loading a save also imports its unlocked alternate recipes (so the planner
+            // matches what the player has actually unlocked).
+            var recipeSummary = await ApplyUnlockedRecipesFromSaveAsync(picked.FullPath);
+            await DisplayAlertAsync("Import save",
+                $"Imported {nodes.Count} resource node(s).\n{recipeSummary}", "OK");
         }
         catch (Exception ex)
         {
