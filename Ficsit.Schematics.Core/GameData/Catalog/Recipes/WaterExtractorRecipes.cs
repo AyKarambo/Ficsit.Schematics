@@ -7,6 +7,6 @@ public sealed class WaterExtractorRecipes : RecipeModule
 
     protected override IReadOnlyList<Recipe> Recipes =>
     [
-        new(8, "Water", Batch: "60", Tier: "3-1", [Out("Water", 120)]),
+        new(8, "Water", Batch: 60, Tier: "3-1", [Out("Water", 120)]),
     ];
 }

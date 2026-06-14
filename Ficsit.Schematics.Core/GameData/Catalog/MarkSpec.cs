@@ -1,3 +1,5 @@
+using Ficsit.Schematics.Core.Numerics;
+
 namespace Ficsit.Schematics.Core.GameData.Catalog;
 
 /// <summary>
@@ -9,7 +11,7 @@ public sealed record MarkSpec(
     int Sort,
     Mark Mark,
     Tier Tier,
-    string Throughput,
+    Rational Throughput,
     bool IsDefault = false,
-    string? Power = null,
+    Rational? Power = null,
     CostEntry[]? Cost = null);

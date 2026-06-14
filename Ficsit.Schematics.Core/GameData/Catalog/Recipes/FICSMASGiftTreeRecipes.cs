@@ -7,6 +7,6 @@ public sealed class FICSMASGiftTreeRecipes : RecipeModule
 
     protected override IReadOnlyList<Recipe> Recipes =>
     [
-        new(316, "FICSMAS Gift", Batch: "4", Tier: "0-3", [Out("FICSMAS Gift", 1)], Ficsmas: true),
+        new(316, "FICSMAS Gift", Batch: 4, Tier: "0-3", [Out("FICSMAS Gift", 1)], Ficsmas: true),
     ];
 }
