@@ -1,6 +1,6 @@
 # Canvas — belt / pipe capacity warnings
 
-> **Status: 📋 Planned — not yet implemented.**
+> **Status: ✅ Implemented.** Belt threshold is catalog-derived; the pipe threshold is a documented constant (pipes aren't modelled as catalog capacities yet).
 
 ## Problem
 

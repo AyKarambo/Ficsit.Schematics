@@ -1,6 +1,6 @@
 # Machine editor — copyable overclock value
 
-> **Status: 📋 Planned — not yet implemented.**
+> **Status: ✅ Implemented.**
 
 ## Problem
 

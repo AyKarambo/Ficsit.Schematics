@@ -1,6 +1,6 @@
 # "From save" unlocked-alternates import — research spike
 
-> **Status: 📚 Research spike — investigation complete; informs [planner-recipe-control.md](planner-recipe-control.md). Not a standalone feature to implement.**
+> **Status: ✅ Implemented** (the spike's research, below, is now built). `SatisfactorySaveReader.ReadUnlockedAlternateSchematics` extracts the unlocked `Schematic_Alternate_*` stems; `SchematicRecipeMap.Match` maps them to catalog recipes via token-set matching + a catalog-validated override table; the recipe list's **"From save"** button enables the unlocked alternates (standard recipes stay on) and reports any unrecognized stems. Implementation note: the spike's "add `UnlockSchematic` to `game_data.json`" suggestion predates the grouped-C# catalog and was superseded by the token-set matcher (no per-recipe schematic id needed).
 
 Spike for [planner-recipe-control.md](planner-recipe-control.md) Phase 5. Goal:
 can we read the set of **unlocked alternate recipes** from a Satisfactory `.sav`

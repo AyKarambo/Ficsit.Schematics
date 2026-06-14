@@ -1,6 +1,6 @@
 # Auto-Planner — clock fit (overclock / underclock budget)
 
-> **Status: 📋 Planned — not yet implemented.**
+> **Status: ✅ Implemented.** Uniform-clock fit to a machine/power budget, post-solve.
 
 > **Priority: optional / lowest of this batch.** It overlaps the per-node **Auto-Round**
 > that already exists ([auto-round.md](auto-round.md)). Listed for completeness because

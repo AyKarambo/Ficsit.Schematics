@@ -1,6 +1,6 @@
 # Plan — Sankey flow view
 
-> **Status: 📋 Planned — not yet implemented.**
+> **Status: ✅ Implemented.** `PlanFlows` (Core) + a `SankeyDrawable`, behind a List⇄Flow toggle in the draft panel.
 
 ## Problem
 

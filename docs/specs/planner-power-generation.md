@@ -1,6 +1,6 @@
 # Auto-Planner — power generation
 
-> **Status: 📋 Planned — not yet implemented.**
+> **Status: ✅ Implemented.** Virtual `#Power` part produced by generators; a "Power (MW)" target plans the generator + fuel + water chain.
 
 ## Problem
 

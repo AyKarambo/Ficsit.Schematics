@@ -1,6 +1,6 @@
 # Auto-Plan upstream from a port drag
 
-> **Status: 📋 Planned — not yet implemented.**
+> **Status: ✅ Implemented.** "Auto-Plan upstream" in the input-port chooser seeds the panel and wires the result into the source port on apply.
 
 ## Problem
 

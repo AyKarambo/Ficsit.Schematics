@@ -1,6 +1,6 @@
 # Auto-Planner — Somersloop amplification
 
-> **Status: 📋 Planned — not yet implemented.**
+> **Status: ✅ Implemented.** v1 = greedy allocator (`SomersloopAllocator`) + LP re-solve with boosted outputs, sharing the `Amplification` helper with the live solver.
 
 ## Problem
 

@@ -5,16 +5,23 @@
 Every spec file carries a `> **Status:**` banner under its title. Legend: ✅ Implemented ·
 🚧 In progress · 📋 Planned (not yet built) · 📚 Research spike (complete, not a feature).
 
-**📋 To implement — batches 4 & 5 (these are the open work):**
-- [planner-somersloop-amplification.md](planner-somersloop-amplification.md)
-- [planner-power-generation.md](planner-power-generation.md)
-- [canvas-belt-capacity-warnings.md](canvas-belt-capacity-warnings.md)
-- [plan-flow-sankey.md](plan-flow-sankey.md)
-- [planner-clock-optimization.md](planner-clock-optimization.md) *(optional)*
-- [machine-copyable-overclock.md](machine-copyable-overclock.md)
-- [planner-panel-layout-ux.md](planner-panel-layout-ux.md)
-- [planner-from-port-drag.md](planner-from-port-drag.md)
-- [save-world-import.md](save-world-import.md) *(large, phased)*
+**📋 To implement — the open work:**
+- [save-world-import.md](save-world-import.md) *(large, phased; blocked on the outpost refactor + a parser-strategy decision)*
+
+**✅ Implemented — batch 4 (game-mechanics depth & UX, done this pass):**
+[machine-copyable-overclock](machine-copyable-overclock.md),
+[canvas-belt-capacity-warnings](canvas-belt-capacity-warnings.md),
+[planner-somersloop-amplification](planner-somersloop-amplification.md),
+[planner-clock-optimization](planner-clock-optimization.md),
+[planner-power-generation](planner-power-generation.md),
+[plan-flow-sankey](plan-flow-sankey.md),
+[planner-from-port-drag](planner-from-port-drag.md),
+[planner-panel-layout-ux](planner-panel-layout-ux.md) *(two-column layout + grouped banned chips deferred)*.
+
+**✅ Implemented — follow-ups (done this pass):**
+[from-save-spike.md](from-save-spike.md) (the "From save" button now imports a save's
+unlocked alternates) · [full-solver.md](full-solver.md) (the "Full" calculator — priority
+splitter/merger routing).
 
 **🚧 In progress:** [outpost-flat-model.md](outpost-flat-model.md) (active branch
 `outpost-flat-model`; supersedes [outpost-linking.md](outpost-linking.md)).
@@ -115,7 +122,7 @@ Planner-quality and review improvements, plus a canvas tidy. **All implemented �
 
 ### Fourth batch (game-research + user notes 2026-06-14) — mechanics depth & UX
 
-**Status: 📋 Planned — none implemented yet.**
+**Status: ✅ All implemented** (price/performance pass: low-complexity specs on Sonnet, planner-core specs on Opus). Build + 189 Core/Data tests green. Deferred sub-items: the Auto-Plan two-column responsive layout and grouped banned-resource chips.
 
 Derived from researching *Satisfactory* 1.0 mechanics against the current app, plus two
 user notes (copyable overclock, planner-panel layout). One spec per feature, sequenced so

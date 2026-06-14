@@ -1,6 +1,6 @@
 # Auto-Plan panel — centered layout & categorized options
 
-> **Status: 📋 Planned — not yet implemented.**
+> **Status: ✅ Implemented.** Centered/enlarged panel, option cards, category-grouped part picker, machine-grouped recipe list. Deferred follow-ups: two-column responsive layout and grouped banned-resource chips.
 
 ## Problem
 
