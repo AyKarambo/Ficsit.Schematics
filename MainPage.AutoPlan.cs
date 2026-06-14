@@ -7,6 +7,8 @@ using Ficsit.Schematics.ViewModels;
 
 namespace Ficsit.Schematics;
 
+// PartPickerGroup lives in ViewModels/PartPickerGroup.cs — pulled in via the using above.
+
 /// <summary>
 /// Auto-Plan: the user states what they want (or what they can provide), picks
 /// a bias and byproduct policy, and the LP planner synthesizes the factory
@@ -40,6 +42,14 @@ public partial class MainPage
     private PlanRequest? _planDraftRequest;
     private string? _planDraftLabel;
 
+    // Sankey renderer for the Flow view of the draft.
+    private readonly SankeyDrawable _sankeyDrawable = new();
+    private bool _draftShowFlow;
+
+    // "Auto-Plan upstream" from a backward (input-port) drag: the result is wired into
+    // this node's port when the plan is applied. Null when the plan wasn't port-seeded.
+    private (FactoryNode SourceNode, string Part)? _planWireInto;
+
     /// <summary>Segment colours for the budget bar, aligned to <see cref="ScarcityWeights.WeightedResources"/>.</summary>
     private static readonly string[] PrefColors =
     [
@@ -52,6 +62,7 @@ public partial class MainPage
         var show = !AutoPlanPanel.IsVisible;
         CloseOverlays();
         AutoPlanPanel.IsVisible = show;
+        if (show) _planWireInto = null; // a manual open is not port-seeded
         if (show && !_planPanelInitialized) InitializeAutoPlanPanel();
     }
 
@@ -97,6 +108,61 @@ public partial class MainPage
         PlanMaxTierPicker.ItemsSource = tiers;
         PlanMaxTierPicker.SelectedIndex = TierIndexFromCap(_state.Settings.PlannerMaxTierPhase);
         _tierSeeding = false;
+
+        PlanSomersloopEntry.Text = _state.Settings.PlannerSomersloopBudget > 0
+            ? _state.Settings.PlannerSomersloopBudget.ToString()
+            : string.Empty;
+
+        PlanFitModePicker.ItemsSource = new List<string> { "No fit", "Machines", "Power (MW)" };
+        PlanFitModePicker.SelectedIndex = Math.Clamp(_state.Settings.PlannerFitMode, 0, 2);
+
+        PlanFitBudgetEntry.Text = _state.Settings.PlannerFitBudget;
+        UpdateFitBudgetRowVisibility();
+    }
+
+    /// <summary>The Somersloop budget entered in the panel (0 when blank/invalid).</summary>
+    private int PlannedSomersloopBudget()
+        => int.TryParse(PlanSomersloopEntry.Text?.Trim(), out var v) && v > 0 ? v : 0;
+
+    private void OnPlanSomersloopChanged(object? sender, EventArgs e)
+    {
+        if (!_planPanelInitialized) return;
+        _state.Settings.PlannerSomersloopBudget = PlannedSomersloopBudget();
+        _state.SaveSettings();
+    }
+
+    /// <summary>Clock-fit mode selected in the panel (0 = None, 1 = Machines, 2 = Power).</summary>
+    private FitMode PlannedFitMode()
+        => PlanFitModePicker.SelectedIndex switch { 1 => FitMode.Machines, 2 => FitMode.Power, _ => FitMode.None };
+
+    /// <summary>Clock-fit budget entered in the panel (0 when blank/invalid).</summary>
+    private Rational PlannedFitBudget()
+        => Rational.TryParse(PlanFitBudgetEntry.Text?.Trim() ?? "", out var v) && v.IsPositive ? v : Rational.Zero;
+
+    private void OnPlanFitModeChanged(object? sender, EventArgs e)
+    {
+        if (!_planPanelInitialized) return;
+        _state.Settings.PlannerFitMode = PlanFitModePicker.SelectedIndex;
+        _state.SaveSettings();
+        UpdateFitBudgetRowVisibility();
+        UpdateFitBudgetLabel();
+    }
+
+    private void OnPlanFitBudgetChanged(object? sender, EventArgs e)
+    {
+        if (!_planPanelInitialized) return;
+        _state.Settings.PlannerFitBudget = PlanFitBudgetEntry.Text?.Trim() ?? string.Empty;
+        _state.SaveSettings();
+    }
+
+    private void UpdateFitBudgetRowVisibility()
+        => PlanFitBudgetRow.IsVisible = PlanFitModePicker.SelectedIndex != 0;
+
+    private void UpdateFitBudgetLabel()
+    {
+        PlanFitBudgetLabel.Text = PlanFitModePicker.SelectedIndex == 2
+            ? "Power budget (MW)"
+            : "Machine budget";
     }
 
     /// <summary>Picker index 0 = "All tiers" (cap 99); index 1..9 = "Tier N" (cap N).</summary>
@@ -128,15 +194,22 @@ public partial class MainPage
         PlanPrefSaveButton.Text = "Save as default";
         PlanByproductLabel.Text = "Byproducts";
         PlanMaxTierLabel.Text = "Available up to";
+        PlanSomersloopLabel.Text = "Somersloops available";
+        PlanFitModeLabel.Text = "Fit to budget";
+        UpdateFitBudgetLabel();
         PlanRunButton.Text = "Plan factory";
         DraftApplyButton.Text = "Apply to canvas";
         DraftDiscardButton.Text = "Discard";
         DraftInputsHeader.Text = "BASE RESOURCES IN";
         DraftRecipesHeader.Text = "RECIPES USED";
+        ToolTipProperties.SetText(DraftListToggle, "Show plan as a list");
+        ToolTipProperties.SetText(DraftFlowToggle, "Show plan as a Sankey flow diagram");
         PlanBusyCancel.Text = "Cancel";
         ApplyRecipeListStrings();
         PartPickerSearch.Placeholder = _loc.L("RECIPE_NAME") + "…";
+        PlanAddPowerButton.Text = "⚡ Power (MW)";
         ToolTipProperties.SetText(PlanAddTargetButton, "Add target");
+        ToolTipProperties.SetText(PlanAddPowerButton, "Add a power output (MW) target — plans generators + fuel");
         ToolTipProperties.SetText(PlanAddProvisionButton, "Add provided input");
     }
 
@@ -144,6 +217,66 @@ public partial class MainPage
 
     private void OnPlanAddTarget(object? sender, EventArgs e)
         => AddPlanRow(PlanTargetsList, _planTargetRows, withLock: false);
+
+    /// <summary>Adds a target row pinned to the virtual power part — "plan me X MW".</summary>
+    private void OnPlanAddPowerTarget(object? sender, EventArgs e)
+    {
+        var row = AddPlanRow(PlanTargetsList, _planTargetRows, withLock: false);
+        row.Part = FactoryPlanner.PowerPart;
+        row.PartButton.Text = PlanPartLabel(FactoryPlanner.PowerPart);
+        row.PartButton.TextColor = RowTextColor();
+        row.Rate.Placeholder = "MW";
+    }
+
+    /// <summary>Friendly label for a target part — the virtual power part reads "Power (MW)".</summary>
+    private string PlanPartLabel(string part)
+        => part == FactoryPlanner.PowerPart ? "Power (MW)" : _loc.L(part);
+
+    /// <summary>
+    /// "Auto-Plan upstream" from a backward (input-port) drag: open Auto-Plan seeded with the
+    /// dragged part at the source machine's required rate, and remember to wire the synthesized
+    /// supply into that machine's port when the plan is applied.
+    /// </summary>
+    private void OnChooserAutoPlanUpstream(object? sender, EventArgs e)
+    {
+        if (_pendingPortConnect is not { } context || context.FromOutput) return;
+        CloseOverlays(); // closes the chooser (and clears the pending port connect)
+        AutoPlanPanel.IsVisible = true;
+        if (!_planPanelInitialized) InitializeAutoPlanPanel();
+        SeedPlanTargetForPort(context);
+        _planWireInto = (context.Node, context.Part);
+    }
+
+    /// <summary>Replaces the targets with a single row for the dragged part at the source's demand.</summary>
+    private void SeedPlanTargetForPort(PortDragContext context)
+    {
+        _planTargetRows.Clear();
+        PlanTargetsList.Children.Clear();
+        var row = AddPlanRow(PlanTargetsList, _planTargetRows, withLock: false);
+        row.Part = context.Part;
+        row.PartButton.Text = PlanPartLabel(context.Part);
+        row.PartButton.TextColor = RowTextColor();
+        var demand = InferredPortDemand(context.Node, context.Part);
+        row.Rate.Text = TrimNumber(demand.ToDecimalString(4, RoundingMode.Nearest));
+        PlanMaximizeSwitch.IsToggled = false;
+        PlanSummaryLabel.Text =
+            $"Seeded from {_loc.L(context.Node.Name)} — plan the supply for {PlanPartLabel(context.Part)}, then Plan factory.";
+    }
+
+    /// <summary>The rate the source node needs of a part: its solved input demand, falling back
+    /// to one machine's recipe rate, then 1 — the seeded value is editable anyway.</summary>
+    private Rational InferredPortDemand(FactoryNode node, string part)
+    {
+        var solved = _state.Editor.Result.For(node);
+        if (solved.Inputs.TryGetValue(part, out var port) && port.Target.IsPositive)
+            return port.Target;
+        if (Data.RecipesByName.TryGetValue(node.Name, out var recipe))
+        {
+            var perMachine = recipe.RatePerMinute(part).Abs();
+            if (perMachine.IsPositive) return perMachine;
+        }
+        return Rational.One;
+    }
 
     private void OnPlanAddProvision(object? sender, EventArgs e)
         => AddPlanRow(PlanProvisionsList, _planProvisionRows, withLock: true);
@@ -236,35 +369,106 @@ public partial class MainPage
 
     // ----------------------------------------------------------- part picker
 
-    private void OpenPartPicker(Action<string> onPicked)
+    /// <summary>
+    /// Flat ordered list of all parts, built once.
+    /// Each item is tagged with its <see cref="PartCategory"/> for grouping.
+    /// </summary>
+    private readonly record struct TaggedPartItem(RecipeListItem Item, PartCategory Category);
+    private List<TaggedPartItem> _allTaggedParts = [];
+
+    private void EnsurePartItemsBuilt()
     {
-        if (_allPartItems.Count == 0)
-            _allPartItems = Data.Document.Parts
-                .Select(p => new RecipeListItem
+        if (_allTaggedParts.Count > 0) return;
+        _allTaggedParts = Data.Document.Parts
+            .Select(p =>
+            {
+                var item = new RecipeListItem
                 {
                     Name = p.Name,
                     DisplayName = _loc.L(p.Name),
                     Icon = _icons.GetSource(p.Name),
-                })
-                .OrderBy(i => i.DisplayName, StringComparer.CurrentCultureIgnoreCase)
-                .ToList();
+                };
+                return new TaggedPartItem(item, PartCategoryClassifier.Classify(p));
+            })
+            .OrderBy(t => t.Item.DisplayName, StringComparer.CurrentCultureIgnoreCase)
+            .ToList();
+
+        // Also back-fill the flat list for any legacy code that might reference it.
+        _allPartItems = _allTaggedParts.Select(t => t.Item).ToList();
+    }
+
+    /// <summary>Builds the grouped <see cref="PartPickerGroup"/> source for the CollectionView.</summary>
+    private List<PartPickerGroup> BuildGroupedParts(string query)
+    {
+        IEnumerable<TaggedPartItem> filtered = _allTaggedParts;
+        if (query.Length > 0)
+            filtered = filtered.Where(t =>
+                t.Item.DisplayName.Contains(query, StringComparison.CurrentCultureIgnoreCase)
+                || t.Item.Name.Contains(query, StringComparison.OrdinalIgnoreCase));
+
+        // Category display order: Raw → Fluid → Intermediate
+        var order = new[] { PartCategory.Raw, PartCategory.Fluid, PartCategory.Intermediate };
+        var groups = new List<PartPickerGroup>();
+        foreach (var cat in order)
+        {
+            var items = filtered.Where(t => t.Category == cat).Select(t => t.Item).ToList();
+            if (items.Count > 0)
+            {
+                var g = new PartPickerGroup(PartCategoryClassifier.Header(cat));
+                g.AddRange(items);
+                groups.Add(g);
+            }
+        }
+        return groups;
+    }
+
+    private void OpenPartPicker(Action<string> onPicked)
+    {
+        EnsurePartItemsBuilt();
 
         _partPickerCallback = onPicked;
         PartPickerSearch.Text = string.Empty;
-        PartPickerList.ItemsSource = _allPartItems;
+        PartPickerList.ItemsSource = BuildGroupedParts(string.Empty);
+        PositionPartPicker();
         PartPickerPanel.IsVisible = true;
         Dispatcher.Dispatch(() => PartPickerSearch.Focus());
+    }
+
+    /// <summary>
+    /// Positions the part picker to the left of the centered Auto-Plan panel.
+    /// The Auto-Plan panel is 780 px wide and centered; the picker is 300 px wide.
+    /// Falls back to a fixed margin when the window is too narrow.
+    /// </summary>
+    private void PositionPartPicker()
+    {
+        const double panelWidth = 780;
+        const double pickerWidth = 300;
+        const double gap = 12;
+
+        var pageWidth = Width;
+        if (pageWidth <= 0) pageWidth = 1200; // safe default before layout
+
+        // Left edge of the centered auto-plan panel
+        var panelLeft = (pageWidth - panelWidth) / 2;
+        // Desired left edge of the picker: to the left of the panel
+        var pickerLeft = panelLeft - pickerWidth - gap;
+
+        // Clamp: if there is not enough room on the left, place it to the right instead
+        if (pickerLeft < gap)
+            pickerLeft = panelLeft + panelWidth + gap;
+
+        // Clamp to page right edge
+        if (pickerLeft + pickerWidth > pageWidth - gap)
+            pickerLeft = pageWidth - pickerWidth - gap;
+
+        PartPickerPanel.TranslationX = Math.Max(gap, pickerLeft);
+        PartPickerPanel.TranslationY = 60;
     }
 
     private void OnPartPickerSearch(object? sender, TextChangedEventArgs e)
     {
         var query = e.NewTextValue?.Trim() ?? string.Empty;
-        PartPickerList.ItemsSource = query.Length == 0
-            ? _allPartItems
-            : _allPartItems.Where(i =>
-                    i.DisplayName.Contains(query, StringComparison.CurrentCultureIgnoreCase)
-                    || i.Name.Contains(query, StringComparison.OrdinalIgnoreCase))
-                .ToList();
+        PartPickerList.ItemsSource = BuildGroupedParts(query);
     }
 
     private void OnPartPicked(object? sender, TappedEventArgs e)
@@ -500,6 +704,9 @@ public partial class MainPage
             MaximizeFromProvisions = PlanMaximizeSwitch.IsToggled,
             Bias = (PlanBias)Math.Max(0, PlanBiasPicker.SelectedIndex),
             Byproducts = PlanByproductPicker.SelectedIndex == 1 ? ByproductMode.AllowSink : ByproductMode.Eliminate,
+            SomersloopBudget = PlannedSomersloopBudget(),
+            FitMode = PlannedFitMode(),
+            FitBudget = PlannedFitBudget(),
         };
         foreach (var banned in _planBanned) request.BannedResources.Add(banned);
 
@@ -537,8 +744,11 @@ public partial class MainPage
         if (request.MaximizeFromProvisions && request.Provisions.Count == 0)
         { PlanSummaryLabel.Text = "Maximize mode needs at least one provided input."; return; }
 
-        var label = string.Join(", ", request.Targets
-            .Select(t => $"{TrimNumber(t.Rate.ToDecimalString(2, RoundingMode.Nearest))} {_loc.L(t.Part)}/min"));
+        var label = string.Join(", ", request.Targets.Select(t =>
+        {
+            var n = TrimNumber(t.Rate.ToDecimalString(2, RoundingMode.Nearest));
+            return t.Part == FactoryPlanner.PowerPart ? $"{n} MW" : $"{n} {_loc.L(t.Part)}/min";
+        }));
         if (request.MaximizeFromProvisions) label = "Max from inputs · " + label;
         StartPlanning(request, label);
     }
@@ -645,6 +855,7 @@ public partial class MainPage
         _planDraftRequest = null;
         _planDraftLabel = null;
         PlanReadyChip.IsVisible = false;
+        _sankeyDrawable.SetFlows(null, IsDark() ? CanvasTheme.Dark : CanvasTheme.Light);
     }
 
     private void OnPlanReadyReview(object? sender, EventArgs e)
@@ -670,13 +881,47 @@ public partial class MainPage
     private void OnDraftDiscard(object? sender, EventArgs e)
     {
         DiscardDraft();
+        _planWireInto = null; // abandon the port-seeded wire-in
         DraftPanel.IsVisible = false;
+    }
+
+    // -------------------------------------------------- draft view toggle
+
+    private void OnDraftListToggle(object? sender, EventArgs e) => SetDraftView(showFlow: false);
+    private void OnDraftFlowToggle(object? sender, EventArgs e) => SetDraftView(showFlow: true);
+
+    private void SetDraftView(bool showFlow)
+    {
+        _draftShowFlow = showFlow;
+        DraftListView.IsVisible  = !showFlow;
+        DraftSankeyView.IsVisible = showFlow;
+        StyleDraftToggle(DraftListToggle,  !showFlow);
+        StyleDraftToggle(DraftFlowToggle,   showFlow);
+        if (showFlow)
+            DraftSankeyView.Invalidate();
+    }
+
+    /// <summary>Applies active/inactive visual state to a draft-view toggle button.</summary>
+    private void StyleDraftToggle(Button btn, bool active)
+    {
+        btn.BackgroundColor = active
+            ? CanvasTheme.Accent.WithAlpha(0.22f)
+            : Colors.Transparent;
+        btn.TextColor = active ? CanvasTheme.Accent : RowTextColor();
     }
 
     /// <summary>Renders the held plan as a scannable summary: totals, raw inputs, recipes.</summary>
     private void RenderDraft(PlanResult plan, PlanRequest? request, string label)
     {
         string N(Rational v) => TrimNumber(v.ToDecimalString(2, RoundingMode.Nearest));
+
+        // Compute the Sankey flow graph and hand it to the drawable.
+        var flows = PlanFlows.From(plan, Data);
+        _sankeyDrawable.SetFlows(flows, IsDark() ? CanvasTheme.Dark : CanvasTheme.Light);
+        DraftSankeyView.Drawable = _sankeyDrawable;
+
+        // Default to List view when opening a fresh draft.
+        SetDraftView(showFlow: false);
 
         DraftTitle.Text = "Draft plan";
         DraftSubtitle.Text = label + (plan.AchievedFraction < Rational.One
@@ -687,7 +932,13 @@ public partial class MainPage
         DraftBadge.Text = zeroWaste ? "Zero waste" : "Sinks used";
         DraftBadge.TextColor = zeroWaste ? CanvasTheme.Accent : MutedTextColor();
 
-        DraftStatsLabel.Text = $"{N(plan.TotalMachines)} machines  ·  {N(plan.TotalPowerMW)} MW  ·  {plan.Recipes.Count} recipes";
+        var clockSuffix = plan.ClockFactor != Rational.One
+            ? $"  ·  clock {N(plan.ClockFactor * 100)}%"
+            : string.Empty;
+        DraftStatsLabel.Text = $"{N(plan.TotalMachines)} machines  ·  {N(plan.TotalPowerMW)} MW  ·  {plan.Recipes.Count} recipes"
+            + (plan.SomersloopsUsed > 0 ? $"  ·  {plan.SomersloopsUsed} Somersloops" : string.Empty)
+            + (plan.PowerGeneratedMW.IsPositive ? $"  ·  {N(plan.PowerGeneratedMW)} MW generated" : string.Empty)
+            + clockSuffix;
 
         DraftInputsList.Children.Clear();
         foreach (var supply in plan.Supplies.OrderByDescending(s => s.Value))
@@ -754,9 +1005,15 @@ public partial class MainPage
     private string Summarize(PlanResult plan, PlanRequest request)
     {
         string N(Rational v) => TrimNumber(v.ToDecimalString(2, RoundingMode.Nearest));
+        var clockNote = plan.ClockFactor != Rational.One
+            ? $" · clock {N(plan.ClockFactor * 100)}%"
+            : string.Empty;
         var lines = new List<string>
         {
-            $"{plan.Recipes.Count} recipes · {N(plan.TotalMachines)} machines · {N(plan.TotalPowerMW)} MW",
+            $"{plan.Recipes.Count} recipes · {N(plan.TotalMachines)} machines · {N(plan.TotalPowerMW)} MW"
+                + (plan.SomersloopsUsed > 0 ? $" · {plan.SomersloopsUsed} Somersloops" : string.Empty)
+                + (plan.PowerGeneratedMW.IsPositive ? $" · {N(plan.PowerGeneratedMW)} MW generated" : string.Empty)
+                + clockNote,
         };
         if (plan.AchievedFraction < Rational.One)
             lines.Add($"⚠ Output scaled to {N(plan.AchievedFraction * 100)}% — bottleneck: "
@@ -786,13 +1043,23 @@ public partial class MainPage
     {
         var editor = _state.Editor;
         var defs = plan.Recipes
-            .Select(r => (Def: Data.RecipesByName[r.Recipe], r.Machines))
+            .Select(r => (Def: Data.RecipesByName[r.Recipe], r.Machines, r.Somersloops))
             .ToList();
 
-        // Place to the right of any existing content in the current scope.
-        var existing = editor.VisibleNodes.ToList();
-        var originX = existing.Count > 0 ? existing.Max(n => n.X) + 400 : (double)_drawable.ScreenToWorld(new PointF(120, 140)).X;
-        var originY = existing.Count > 0 ? existing.Min(n => n.Y) : (double)_drawable.ScreenToWorld(new PointF(120, 140)).Y;
+        // Place to the right of existing content — or upstream (left of) the source node when
+        // this plan was seeded from a backward port drag, so the wire-in reads naturally.
+        double originX, originY;
+        if (_planWireInto is { } wire)
+        {
+            originX = wire.SourceNode.X - 520;
+            originY = wire.SourceNode.Y;
+        }
+        else
+        {
+            var existing = editor.VisibleNodes.ToList();
+            originX = existing.Count > 0 ? existing.Max(n => n.X) + 400 : (double)_drawable.ScreenToWorld(new PointF(120, 140)).X;
+            originY = existing.Count > 0 ? existing.Min(n => n.Y) : (double)_drawable.ScreenToWorld(new PointF(120, 140)).Y;
+        }
 
         var created = new Dictionary<string, FactoryNode>();
         var placed = new List<FactoryNode>();
@@ -803,10 +1070,14 @@ public partial class MainPage
         {
             editor.Commands.BeginGroup("Apply plan");
 
-            foreach (var (def, machines) in defs)
+            foreach (var (def, machines, sloops) in defs)
             {
                 var node = editor.AddNode(def.Name, originX, originY);
                 editor.SetLimit(node, machines.ToString());
+                if (sloops > 0) node.Somersloops = sloops;
+                // Apply uniform overclock when the clock-fit pass chose a factor.
+                if (plan.ClockFactor != Rational.One)
+                    node.ClockSpeed = plan.ClockFactor;
                 created[def.Name] = node;
                 placed.Add(node);
             }
@@ -832,6 +1103,13 @@ public partial class MainPage
                         editor.Connect(created[producer], part, sink);
                 }
             }
+
+            // Feed the synthesized supply into the source machine's input when this plan was
+            // seeded from a backward port drag ("Auto-Plan upstream").
+            if (_planWireInto is { } wireIn)
+                foreach (var (def, _, _) in defs)
+                    if (def.RatePerMinute(wireIn.Part).IsPositive && created.TryGetValue(def.Name, out var producerNode))
+                        editor.Connect(producerNode, wireIn.Part, wireIn.SourceNode);
 
             editor.Commands.EndGroup();
         }
@@ -861,6 +1139,7 @@ public partial class MainPage
             }
         }
 
+        _planWireInto = null; // consumed
         _state.SetSelection(selection);
         _drawable.InvalidateLayouts();
         _controller.ZoomToFit(new SizeF((float)Canvas.Width, (float)Canvas.Height));

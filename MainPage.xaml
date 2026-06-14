@@ -161,6 +161,16 @@
             <Setter Property="StrokeShape" Value="RoundRectangle 8" />
             <Setter Property="Padding" Value="8,5" />
         </Style>
+
+        <!-- Light card for grouping controls within the wider Auto-Plan panel -->
+        <Style x:Key="Card" TargetType="Border">
+            <Setter Property="BackgroundColor" Value="{AppThemeBinding Light=#F0F4FF, Dark=#1E2230}" />
+            <Setter Property="Stroke" Value="{AppThemeBinding Light=#D8DCE8, Dark=#2E3448}" />
+            <Setter Property="StrokeThickness" Value="1" />
+            <Setter Property="StrokeShape" Value="RoundRectangle 10" />
+            <Setter Property="Padding" Value="12,8" />
+            <Setter Property="Margin" Value="0,4,0,0" />
+        </Style>
     </ContentPage.Resources>
 
     <Grid>
@@ -290,6 +300,8 @@
                                     WidthRequest="22" HeightRequest="22" Clicked="OnChooserFilterCleared" />
                         </HorizontalStackLayout>
                     </Border>
+                    <Button x:Name="ChooserAutoPlanButton" Style="{StaticResource TextButton}" FontSize="11"
+                            IsVisible="False" Clicked="OnChooserAutoPlanUpstream" />
                 </HorizontalStackLayout>
                 <HorizontalStackLayout Grid.Row="2" Spacing="6">
                     <Label x:Name="ChooserMatchLabel" Style="{StaticResource MutedLabel}" VerticalOptions="Center" />
@@ -365,22 +377,24 @@
                     <Picker x:Name="PopupRecipePicker" Grid.Column="1" WidthRequest="150" SelectedIndexChanged="OnPopupRecipeChanged" />
                 </Grid>
 
-                <Grid x:Name="PopupClockRow" ColumnDefinitions="Auto,*,Auto,Auto" ColumnSpacing="4">
+                <Grid x:Name="PopupClockRow" ColumnDefinitions="Auto,*,Auto,Auto,Auto" ColumnSpacing="4">
                     <Label x:Name="PopupClockLabel" Style="{StaticResource RowLabel}" />
                     <Entry x:Name="PopupClockEntry" Grid.Column="1" Style="{StaticResource FieldEntry}" Margin="8,0,0,0"
                            HorizontalTextAlignment="End" Completed="OnPopupClockCompleted" />
                     <Button Grid.Column="2" Style="{StaticResource IconButton}" Text="&#xE738;" FontSize="11" WidthRequest="30" Clicked="OnClockStepDown" />
                     <Button Grid.Column="3" Style="{StaticResource IconButton}" Text="&#xE710;" FontSize="11" WidthRequest="30" Clicked="OnClockStepUp" />
+                    <Button Grid.Column="4" Style="{StaticResource IconButton}" Text="&#xE8C8;" FontSize="11" WidthRequest="30" Clicked="OnCopyClockClicked" />
                 </Grid>
 
                 <!-- Auto-Round replaces the free clock entry: read-only "N × clock%"
                      with a machine-count stepper (− = more machines, + = fewer). -->
-                <Grid x:Name="PopupAutoClockRow" IsVisible="False" ColumnDefinitions="Auto,*,Auto,Auto" ColumnSpacing="4">
+                <Grid x:Name="PopupAutoClockRow" IsVisible="False" ColumnDefinitions="Auto,*,Auto,Auto,Auto" ColumnSpacing="4">
                     <Label x:Name="PopupAutoClockLabel" Style="{StaticResource RowLabel}" />
                     <Label x:Name="PopupAutoClockValue" Grid.Column="1" Style="{StaticResource RowLabel}"
                            FontFamily="OpenSansSemibold" HorizontalTextAlignment="End" Margin="0,0,8,0" />
                     <Button x:Name="PopupAutoClockDownButton" Grid.Column="2" Style="{StaticResource IconButton}" Text="&#xE738;" FontSize="11" WidthRequest="30" Clicked="OnAutoRoundStepDown" />
                     <Button x:Name="PopupAutoClockUpButton" Grid.Column="3" Style="{StaticResource IconButton}" Text="&#xE710;" FontSize="11" WidthRequest="30" Clicked="OnAutoRoundStepUp" />
+                    <Button Grid.Column="4" Style="{StaticResource IconButton}" Text="&#xE8C8;" FontSize="11" WidthRequest="30" Clicked="OnCopyAutoClockClicked" />
                 </Grid>
 
                 <Grid x:Name="PopupSloopRow" ColumnDefinitions="Auto,*,Auto,Auto" ColumnSpacing="4">
@@ -389,6 +403,12 @@
                            FontFamily="OpenSansSemibold" HorizontalTextAlignment="End" Margin="0,0,8,0" />
                     <Button Grid.Column="2" Style="{StaticResource IconButton}" Text="&#xE738;" FontSize="11" WidthRequest="30" Clicked="OnSloopDown" />
                     <Button Grid.Column="3" Style="{StaticResource IconButton}" Text="&#xE710;" FontSize="11" WidthRequest="30" Clicked="OnSloopUp" />
+                </Grid>
+
+                <!-- Copy machine setup: compact one-line summary to clipboard -->
+                <Grid x:Name="PopupCopySetupRow" ColumnDefinitions="*,Auto" ColumnSpacing="6">
+                    <Label x:Name="PopupCopySetupLabel" Style="{StaticResource RowLabel}" />
+                    <Button x:Name="PopupCopySetupButton" Grid.Column="1" Style="{StaticResource IconButton}" Text="&#xE8C8;" FontSize="11" WidthRequest="30" Clicked="OnCopySetupClicked" />
                 </Grid>
 
                 <Grid x:Name="PopupAutoRoundRow" ColumnDefinitions="*,Auto">
@@ -467,6 +487,10 @@
                         <Label x:Name="FocusHighlightLabel" Style="{StaticResource RowLabel}" FontSize="11.5" />
                         <Switch x:Name="FocusHighlightSwitch" Grid.Column="1" Toggled="OnFocusHighlightToggled" />
                     </Grid>
+                    <Grid ColumnDefinitions="*,Auto">
+                        <Label x:Name="BeltCapacityWarningsLabel" Style="{StaticResource RowLabel}" FontSize="11.5" />
+                        <Switch x:Name="BeltCapacityWarningsSwitch" Grid.Column="1" Toggled="OnBeltCapacityWarningsToggled" />
+                    </Grid>
 
                     <Label x:Name="SettingsPlannerHeader" Style="{StaticResource SectionHeader}" />
                     <Grid ColumnDefinitions="*,Auto">
@@ -541,78 +565,112 @@
             </VerticalStackLayout>
         </Border>
 
-        <!-- ====================== auto-plan panel ====================== -->
+        <!-- ====================== auto-plan panel (centered, wider) ====================== -->
         <Border x:Name="AutoPlanPanel" Style="{StaticResource Panel}" IsVisible="False"
-                HorizontalOptions="End" VerticalOptions="Start" Margin="12,60,12,12" WidthRequest="380">
-            <ScrollView MaximumHeightRequest="640">
+                HorizontalOptions="Center" VerticalOptions="Start" Margin="0,60,0,12"
+                WidthRequest="780" MaximumWidthRequest="840">
+            <ScrollView MaximumHeightRequest="700">
                 <!-- right gutter so the WinUI overlay scrollbar clears the content -->
-                <VerticalStackLayout Spacing="7" Padding="0,0,14,0">
+                <VerticalStackLayout Spacing="6" Padding="0,0,14,0">
                     <Label x:Name="AutoPlanTitle" Style="{StaticResource PanelTitle}" />
 
-                    <Label x:Name="PlanTargetsHeader" Style="{StaticResource SectionHeader}" />
-                    <VerticalStackLayout x:Name="PlanTargetsList" Spacing="4" />
-                    <Grid ColumnDefinitions="Auto,*" ColumnSpacing="6">
-                        <Button x:Name="PlanAddTargetButton" Style="{StaticResource IconButton}" Text="&#xE710;" Clicked="OnPlanAddTarget" />
-                        <Picker x:Name="PlanPhasePicker" Grid.Column="1" SelectedIndexChanged="OnPlanPhasePicked" />
-                    </Grid>
-                    <Grid ColumnDefinitions="*,Auto">
-                        <Label x:Name="PlanMaximizeLabel" Style="{StaticResource RowLabel}" FontSize="11.5" />
-                        <Switch x:Name="PlanMaximizeSwitch" Grid.Column="1" />
-                    </Grid>
+                    <!-- ── Card 1: What to build ── -->
+                    <Border Style="{StaticResource Card}">
+                        <VerticalStackLayout Spacing="7">
+                            <Label x:Name="PlanTargetsHeader" Style="{StaticResource SectionHeader}" Margin="0,0,0,4" />
+                            <VerticalStackLayout x:Name="PlanTargetsList" Spacing="4" />
+                            <Grid ColumnDefinitions="Auto,Auto,*" ColumnSpacing="6">
+                                <Button x:Name="PlanAddTargetButton" Style="{StaticResource IconButton}" Text="&#xE710;" Clicked="OnPlanAddTarget" />
+                                <Button x:Name="PlanAddPowerButton" Grid.Column="1" Style="{StaticResource TextButton}" FontSize="11" Clicked="OnPlanAddPowerTarget" />
+                                <Picker x:Name="PlanPhasePicker" Grid.Column="2" SelectedIndexChanged="OnPlanPhasePicked" />
+                            </Grid>
+                            <Grid ColumnDefinitions="*,Auto">
+                                <Label x:Name="PlanMaximizeLabel" Style="{StaticResource RowLabel}" FontSize="11.5" />
+                                <Switch x:Name="PlanMaximizeSwitch" Grid.Column="1" />
+                            </Grid>
+                        </VerticalStackLayout>
+                    </Border>
 
-                    <Label x:Name="PlanProvidedHeader" Style="{StaticResource SectionHeader}" />
-                    <VerticalStackLayout x:Name="PlanProvisionsList" Spacing="4" />
-                    <Button x:Name="PlanAddProvisionButton" Style="{StaticResource IconButton}" Text="&#xE710;" HorizontalOptions="Start" Clicked="OnPlanAddProvision" />
+                    <!-- ── Card 2: Inputs & limits ── -->
+                    <Border Style="{StaticResource Card}">
+                        <VerticalStackLayout Spacing="7">
+                            <Label x:Name="PlanProvidedHeader" Style="{StaticResource SectionHeader}" Margin="0,0,0,4" />
+                            <VerticalStackLayout x:Name="PlanProvisionsList" Spacing="4" />
+                            <Button x:Name="PlanAddProvisionButton" Style="{StaticResource IconButton}" Text="&#xE710;" HorizontalOptions="Start" Clicked="OnPlanAddProvision" />
+                            <Label x:Name="PlanBannedHeader" Style="{StaticResource SectionHeader}" Margin="0,6,0,4" />
+                            <FlexLayout x:Name="PlanBannedChips" Wrap="Wrap" Direction="Row" JustifyContent="Start" AlignItems="Center" />
+                            <Grid ColumnDefinitions="*,Auto" ColumnSpacing="6" Margin="0,6,0,0">
+                                <Label x:Name="PlanMaxTierLabel" Style="{StaticResource RowLabel}" />
+                                <Picker x:Name="PlanMaxTierPicker" Grid.Column="1" WidthRequest="150" SelectedIndexChanged="OnPlanMaxTierChanged" />
+                            </Grid>
+                        </VerticalStackLayout>
+                    </Border>
 
-                    <Label x:Name="PlanBannedHeader" Style="{StaticResource SectionHeader}" />
-                    <FlexLayout x:Name="PlanBannedChips" Wrap="Wrap" Direction="Row" JustifyContent="Start" AlignItems="Center" />
+                    <!-- ── Card 3: Optimization ── -->
+                    <Border Style="{StaticResource Card}">
+                        <VerticalStackLayout Spacing="7">
+                            <Grid ColumnDefinitions="*,Auto" ColumnSpacing="6">
+                                <Label x:Name="PlanBiasLabel" Style="{StaticResource RowLabel}" />
+                                <Picker x:Name="PlanBiasPicker" Grid.Column="1" WidthRequest="150" />
+                            </Grid>
+                            <Button x:Name="PlanPreferenceToggle" Style="{StaticResource TextButton}" FontSize="12"
+                                    HorizontalOptions="Start" Clicked="OnPlanPreferenceToggle" />
+                            <VerticalStackLayout x:Name="PlanPreferenceBody" Spacing="6" IsVisible="False">
+                                <Label x:Name="PlanPreferenceHint" Style="{StaticResource MutedLabel}" FontSize="11" LineBreakMode="WordWrap" />
+                                <Grid x:Name="PlanPreferenceBar" HeightRequest="10" ColumnSpacing="0" />
+                                <VerticalStackLayout x:Name="PlanPreferenceList" Spacing="4" />
+                                <FlexLayout Wrap="Wrap" Direction="Row" AlignItems="Center">
+                                    <Button x:Name="PlanPrefEqualButton" Style="{StaticResource TextButton}" FontSize="11" Margin="0,0,10,0" Clicked="OnPlanPrefEqual" />
+                                    <Button x:Name="PlanPrefResetButton" Style="{StaticResource TextButton}" FontSize="11" Margin="0,0,10,0" Clicked="OnPlanPrefReset" />
+                                    <Button x:Name="PlanPrefSaveButton" Style="{StaticResource TextButton}" FontSize="11" Clicked="OnPlanPrefSave" />
+                                </FlexLayout>
+                            </VerticalStackLayout>
+                            <Grid ColumnDefinitions="*,Auto" ColumnSpacing="6">
+                                <Label x:Name="PlanByproductLabel" Style="{StaticResource RowLabel}" />
+                                <Picker x:Name="PlanByproductPicker" Grid.Column="1" WidthRequest="150" />
+                            </Grid>
+                            <Grid ColumnDefinitions="*,90" ColumnSpacing="6">
+                                <Label x:Name="PlanSomersloopLabel" Style="{StaticResource RowLabel}" FontSize="11.5" VerticalOptions="Center" />
+                                <Entry x:Name="PlanSomersloopEntry" Grid.Column="1" Style="{StaticResource FieldEntry}" Placeholder="0"
+                                       Keyboard="Numeric" HorizontalTextAlignment="End" Completed="OnPlanSomersloopChanged" Unfocused="OnPlanSomersloopChanged" />
+                            </Grid>
+                            <Grid ColumnDefinitions="*,Auto" ColumnSpacing="6">
+                                <Label x:Name="PlanFitModeLabel" Style="{StaticResource RowLabel}" FontSize="11.5" VerticalOptions="Center" />
+                                <Picker x:Name="PlanFitModePicker" Grid.Column="1" WidthRequest="120" SelectedIndexChanged="OnPlanFitModeChanged" />
+                            </Grid>
+                            <Grid x:Name="PlanFitBudgetRow" ColumnDefinitions="*,90" ColumnSpacing="6">
+                                <Label x:Name="PlanFitBudgetLabel" Style="{StaticResource RowLabel}" FontSize="11.5" VerticalOptions="Center" />
+                                <Entry x:Name="PlanFitBudgetEntry" Grid.Column="1" Style="{StaticResource FieldEntry}" Placeholder="0"
+                                       Keyboard="Numeric" HorizontalTextAlignment="End" Completed="OnPlanFitBudgetChanged" Unfocused="OnPlanFitBudgetChanged" />
+                            </Grid>
+                        </VerticalStackLayout>
+                    </Border>
 
-                    <Grid ColumnDefinitions="*,Auto" ColumnSpacing="6">
-                        <Label x:Name="PlanBiasLabel" Style="{StaticResource RowLabel}" />
-                        <Picker x:Name="PlanBiasPicker" Grid.Column="1" WidthRequest="150" />
-                    </Grid>
+                    <!-- ── Card 4: Output ── -->
+                    <Border Style="{StaticResource Card}">
+                        <VerticalStackLayout Spacing="7">
+                            <Grid ColumnDefinitions="*,Auto">
+                                <Label x:Name="PlanExcludeManualLabel" Style="{StaticResource RowLabel}" FontSize="11.5" />
+                                <Switch x:Name="PlanExcludeManualSwitch" Grid.Column="1" Toggled="OnPlanExcludeManualToggled" />
+                            </Grid>
+                            <Grid ColumnDefinitions="*,Auto">
+                                <Label x:Name="PlanOreConversionLabel" Style="{StaticResource RowLabel}" FontSize="11.5" />
+                                <Switch x:Name="PlanOreConversionSwitch" Grid.Column="1" Toggled="OnPlanOreConversionToggled" />
+                            </Grid>
+                            <Grid ColumnDefinitions="*,Auto">
+                                <Label x:Name="PlanAutoApplyLabel" Style="{StaticResource RowLabel}" FontSize="11.5" />
+                                <Switch x:Name="PlanAutoApplySwitch" Grid.Column="1" Toggled="OnPlanAutoApplyToggled" />
+                            </Grid>
+                            <Grid ColumnDefinitions="*,Auto">
+                                <Label x:Name="PlanAutoCollapseLabel" Style="{StaticResource RowLabel}" FontSize="11.5" />
+                                <Switch x:Name="PlanAutoCollapseSwitch" Grid.Column="1" Toggled="OnPlanAutoCollapseToggled" />
+                            </Grid>
+                            <Button x:Name="PlanRecipesButton" Style="{StaticResource TextButton}" FontSize="12"
+                                    HorizontalOptions="Start" Clicked="OnPlanRecipesClicked" />
+                        </VerticalStackLayout>
+                    </Border>
 
-                    <Button x:Name="PlanPreferenceToggle" Style="{StaticResource TextButton}" FontSize="12"
-                            HorizontalOptions="Start" Clicked="OnPlanPreferenceToggle" />
-                    <VerticalStackLayout x:Name="PlanPreferenceBody" Spacing="6" IsVisible="False">
-                        <Label x:Name="PlanPreferenceHint" Style="{StaticResource MutedLabel}" FontSize="11" LineBreakMode="WordWrap" />
-                        <Grid x:Name="PlanPreferenceBar" HeightRequest="10" ColumnSpacing="0" />
-                        <VerticalStackLayout x:Name="PlanPreferenceList" Spacing="4" />
-                        <FlexLayout Wrap="Wrap" Direction="Row" AlignItems="Center">
-                            <Button x:Name="PlanPrefEqualButton" Style="{StaticResource TextButton}" FontSize="11" Margin="0,0,10,0" Clicked="OnPlanPrefEqual" />
-                            <Button x:Name="PlanPrefResetButton" Style="{StaticResource TextButton}" FontSize="11" Margin="0,0,10,0" Clicked="OnPlanPrefReset" />
-                            <Button x:Name="PlanPrefSaveButton" Style="{StaticResource TextButton}" FontSize="11" Clicked="OnPlanPrefSave" />
-                        </FlexLayout>
-                    </VerticalStackLayout>
-
-                    <Grid ColumnDefinitions="*,Auto" ColumnSpacing="6">
-                        <Label x:Name="PlanByproductLabel" Style="{StaticResource RowLabel}" />
-                        <Picker x:Name="PlanByproductPicker" Grid.Column="1" WidthRequest="150" />
-                    </Grid>
-                    <Grid ColumnDefinitions="*,Auto" ColumnSpacing="6">
-                        <Label x:Name="PlanMaxTierLabel" Style="{StaticResource RowLabel}" />
-                        <Picker x:Name="PlanMaxTierPicker" Grid.Column="1" WidthRequest="150" SelectedIndexChanged="OnPlanMaxTierChanged" />
-                    </Grid>
-                    <Grid ColumnDefinitions="*,Auto">
-                        <Label x:Name="PlanExcludeManualLabel" Style="{StaticResource RowLabel}" FontSize="11.5" />
-                        <Switch x:Name="PlanExcludeManualSwitch" Grid.Column="1" Toggled="OnPlanExcludeManualToggled" />
-                    </Grid>
-                    <Grid ColumnDefinitions="*,Auto">
-                        <Label x:Name="PlanOreConversionLabel" Style="{StaticResource RowLabel}" FontSize="11.5" />
-                        <Switch x:Name="PlanOreConversionSwitch" Grid.Column="1" Toggled="OnPlanOreConversionToggled" />
-                    </Grid>
-                    <Grid ColumnDefinitions="*,Auto">
-                        <Label x:Name="PlanAutoApplyLabel" Style="{StaticResource RowLabel}" FontSize="11.5" />
-                        <Switch x:Name="PlanAutoApplySwitch" Grid.Column="1" Toggled="OnPlanAutoApplyToggled" />
-                    </Grid>
-                    <Grid ColumnDefinitions="*,Auto">
-                        <Label x:Name="PlanAutoCollapseLabel" Style="{StaticResource RowLabel}" FontSize="11.5" />
-                        <Switch x:Name="PlanAutoCollapseSwitch" Grid.Column="1" Toggled="OnPlanAutoCollapseToggled" />
-                    </Grid>
-                    <Button x:Name="PlanRecipesButton" Style="{StaticResource TextButton}" FontSize="12"
-                            HorizontalOptions="Start" Clicked="OnPlanRecipesClicked" />
-
-                    <Button x:Name="PlanRunButton" Style="{StaticResource AccentButton}" Clicked="OnPlanRunClicked" />
+                    <Button x:Name="PlanRunButton" Style="{StaticResource AccentButton}" Margin="0,8,0,0" Clicked="OnPlanRunClicked" />
                     <Label x:Name="PlanSummaryLabel" Style="{StaticResource MutedLabel}" LineBreakMode="WordWrap" />
                 </VerticalStackLayout>
             </ScrollView>
@@ -621,25 +679,48 @@
         <!-- draft review: the plan is held here until the user applies it -->
         <Border x:Name="DraftPanel" Style="{StaticResource Panel}" IsVisible="False"
                 HorizontalOptions="End" VerticalOptions="Start" Margin="12,60,12,12" WidthRequest="380">
-            <ScrollView MaximumHeightRequest="640">
-                <VerticalStackLayout Spacing="6" Padding="0,0,14,0">
-                    <Grid ColumnDefinitions="*,Auto" ColumnSpacing="6">
-                        <Label x:Name="DraftTitle" Style="{StaticResource PanelTitle}" />
-                        <Label x:Name="DraftBadge" Grid.Column="1" FontSize="10.5" FontFamily="OpenSansSemibold" VerticalOptions="Center" />
-                    </Grid>
-                    <Label x:Name="DraftSubtitle" Style="{StaticResource MutedLabel}" LineBreakMode="WordWrap" />
-                    <Label x:Name="DraftStatsLabel" Style="{StaticResource RowLabel}" FontSize="13" Margin="0,4,0,0" />
-                    <Label x:Name="DraftInputsHeader" Style="{StaticResource SectionHeader}" />
-                    <VerticalStackLayout x:Name="DraftInputsList" Spacing="2" />
-                    <Label x:Name="DraftRecipesHeader" Style="{StaticResource SectionHeader}" />
-                    <VerticalStackLayout x:Name="DraftRecipesList" Spacing="2" />
-                    <Label x:Name="DraftByproductsLabel" Style="{StaticResource MutedLabel}" LineBreakMode="WordWrap" Margin="0,6,0,0" />
-                    <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8" Margin="0,8,0,0">
-                        <Button x:Name="DraftApplyButton" Style="{StaticResource AccentButton}" Clicked="OnDraftApply" />
-                        <Button x:Name="DraftDiscardButton" Grid.Column="1" Style="{StaticResource TextButton}" Clicked="OnDraftDiscard" />
-                    </Grid>
-                </VerticalStackLayout>
-            </ScrollView>
+            <VerticalStackLayout Spacing="6">
+                <!-- header row: title + badge + view toggle -->
+                <Grid ColumnDefinitions="*,Auto,Auto,Auto" ColumnSpacing="6">
+                    <Label x:Name="DraftTitle" Style="{StaticResource PanelTitle}" />
+                    <Label x:Name="DraftBadge" Grid.Column="1" FontSize="10.5" FontFamily="OpenSansSemibold" VerticalOptions="Center" />
+                    <Button x:Name="DraftListToggle" Grid.Column="2" Style="{StaticResource TextButton}"
+                            FontSize="11" HeightRequest="26" Padding="8,0" Text="List"
+                            Clicked="OnDraftListToggle" />
+                    <Button x:Name="DraftFlowToggle" Grid.Column="3" Style="{StaticResource TextButton}"
+                            FontSize="11" HeightRequest="26" Padding="8,0" Text="Flow"
+                            Clicked="OnDraftFlowToggle" />
+                </Grid>
+
+                <!-- LIST view (scrollable) -->
+                <ScrollView x:Name="DraftListView" MaximumHeightRequest="580">
+                    <VerticalStackLayout Spacing="6" Padding="0,0,14,0">
+                        <Label x:Name="DraftSubtitle" Style="{StaticResource MutedLabel}" LineBreakMode="WordWrap" />
+                        <Label x:Name="DraftStatsLabel" Style="{StaticResource RowLabel}" FontSize="13" Margin="0,4,0,0" />
+                        <Label x:Name="DraftInputsHeader" Style="{StaticResource SectionHeader}" />
+                        <VerticalStackLayout x:Name="DraftInputsList" Spacing="2" />
+                        <Label x:Name="DraftRecipesHeader" Style="{StaticResource SectionHeader}" />
+                        <VerticalStackLayout x:Name="DraftRecipesList" Spacing="2" />
+                        <Label x:Name="DraftByproductsLabel" Style="{StaticResource MutedLabel}" LineBreakMode="WordWrap" Margin="0,6,0,0" />
+                    </VerticalStackLayout>
+                </ScrollView>
+
+                <!-- FLOW / Sankey view -->
+                <GraphicsView x:Name="DraftSankeyView" IsVisible="False"
+                              HeightRequest="460" BackgroundColor="Transparent" />
+
+                <!-- action buttons (always visible) -->
+                <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8" Padding="0,0,14,0">
+                    <Button x:Name="DraftApplyButton" Style="{StaticResource AccentButton}" Clicked="OnDraftApply" />
+                    <Button x:Name="DraftDiscardButton" Grid.Column="1" Style="{StaticResource TextButton}" Clicked="OnDraftDiscard" />
+                </Grid>
+            </VerticalStackLayout>
+        </Border>
+
+        <!-- clock-copy confirmation toast: briefly shown then auto-hidden -->
+        <Border x:Name="CopyClockToast" Style="{StaticResource Pill}" IsVisible="False"
+                HorizontalOptions="End" VerticalOptions="Start" Margin="0,60,320,0" Padding="14,8">
+            <Label x:Name="CopyClockToastLabel" Style="{StaticResource RowLabel}" />
         </Border>
 
         <!-- background planning status: busy chip (while solving) and ready chip (draft waiting) -->
@@ -656,13 +737,20 @@
             <Button x:Name="PlanReadyButton" Style="{StaticResource TextButton}" FontSize="12.5" Clicked="OnPlanReadyReview" />
         </Border>
 
-        <!-- part picker for the auto-plan rows -->
+        <!-- part picker for the auto-plan rows — positioned from code via TranslationX/Y -->
         <Border x:Name="PartPickerPanel" Style="{StaticResource Panel}" IsVisible="False"
-                HorizontalOptions="End" VerticalOptions="Start" Margin="12,60,404,12"
-                WidthRequest="300" HeightRequest="440">
+                HorizontalOptions="Start" VerticalOptions="Start"
+                WidthRequest="300" HeightRequest="480">
             <Grid RowDefinitions="Auto,*" RowSpacing="8">
                 <Entry x:Name="PartPickerSearch" Style="{StaticResource FieldEntry}" TextChanged="OnPartPickerSearch" />
-                <CollectionView x:Name="PartPickerList" Grid.Row="1" SelectionMode="None" ItemSizingStrategy="MeasureFirstItem">
+                <CollectionView x:Name="PartPickerList" Grid.Row="1" SelectionMode="None"
+                                IsGrouped="True" ItemSizingStrategy="MeasureFirstItem">
+                    <CollectionView.GroupHeaderTemplate>
+                        <DataTemplate x:DataType="vm:PartPickerGroup">
+                            <Label Text="{Binding Header}" Style="{StaticResource SectionHeader}"
+                                   Margin="2,8,0,2" />
+                        </DataTemplate>
+                    </CollectionView.GroupHeaderTemplate>
                     <CollectionView.ItemTemplate>
                         <DataTemplate x:DataType="vm:RecipeListItem">
                             <Border Style="{StaticResource ListRow}" Margin="0,2">

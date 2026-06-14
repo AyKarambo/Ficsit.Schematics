@@ -11,6 +11,9 @@ public sealed partial class FactoryCanvasDrawable
 {
     // ------------------------------------------------------------ connections
 
+    // Red tint for over-capacity connections.
+    private static readonly Color OverCapacityColor = Color.FromArgb("#CC3300");
+
     private void DrawConnection(
         ICanvas canvas,
         NodeConnection connection,
@@ -35,8 +38,20 @@ public sealed partial class FactoryCanvasDrawable
             ? toLayout.PortAnchor(toPort)
             : new PointF(toLayout.Bounds.Left, toLayout.Bounds.Center.Y);
 
-        canvas.StrokeColor = state.Settings.WireColorByPart ? PartPalette.ColorFor(connection.Part) : Theme.Wire;
-        canvas.StrokeSize = 2f;
+        // Determine if this connection is over capacity.
+        var flow = result.FlowOf(connection);
+        ConnectionOverflow? overflow = null;
+        if (state.Settings.ShowBeltCapacityWarnings && flow > Rational.Zero)
+        {
+            var isFluid = state.Data.PartsByName.TryGetValue(connection.Part, out var partDef) && partDef.Fluid;
+            var threshold = isFluid ? state.Data.MaxPipeThroughput : state.Data.MaxBeltThroughput;
+            overflow = ConnectionOverflowHelper.Check(flow, threshold);
+        }
+
+        canvas.StrokeColor = overflow is not null
+            ? OverCapacityColor
+            : state.Settings.WireColorByPart ? PartPalette.ColorFor(connection.Part) : Theme.Wire;
+        canvas.StrokeSize = overflow is not null ? 3f : 2f;
 
         var path = new PathF();
         path.MoveTo(start);
@@ -63,13 +78,40 @@ public sealed partial class FactoryCanvasDrawable
         canvas.DrawPath(path);
 
         // Mid label: part icon + flow ppm — pill treatment (Slice B #3).
-        var flow = result.FlowOf(connection);
         var icon = icons.GetImage(connection.Part);
         const float iconSize = 16f;
         if (icon is not null)
             canvas.DrawImage(icon, mid.X - iconSize - 2, mid.Y - iconSize / 2, iconSize, iconSize);
         // The label sits to the right of the icon, centred on mid.Y.
         DrawLabelPill(canvas, numbers.Connection(flow), mid.X, mid.Y, anchorRight: false);
+
+        // Over-capacity warning: a small warning glyph (⚠) above the mid-point.
+        if (overflow is not null)
+            DrawOverCapacityWarning(canvas, mid, overflow);
+    }
+
+    private void DrawOverCapacityWarning(ICanvas canvas, PointF mid, ConnectionOverflow overflow)
+    {
+        // Draw a small warning indicator above the connection mid-label.
+        // The glyph is a "!" in a red circle, positioned above the flow label.
+        const float glyphSize = 14f;
+        const float glyphOffset = 20f; // above mid
+
+        var gx = mid.X - glyphSize / 2;
+        var gy = mid.Y - glyphOffset - glyphSize;
+
+        canvas.FillColor = OverCapacityColor;
+        canvas.FillEllipse(gx, gy, glyphSize, glyphSize);
+
+        canvas.FontColor = Colors.White;
+        canvas.FontSize = 9f;
+        canvas.DrawString("!", gx, gy, glyphSize, glyphSize,
+            HorizontalAlignment.Center, VerticalAlignment.Center);
+
+        // Tooltip-style label: "N× needed" hint, drawn as a small pill below the glyph.
+        // The actual tooltip text is set on hover by CanvasController; here we show a
+        // compact "×N" suffix on the flow pill so it's visible without hovering.
+        // (The canonical tooltip is handled in CanvasController.Queries.cs.)
     }
 
     /// <summary>

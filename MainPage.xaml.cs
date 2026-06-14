@@ -37,7 +37,7 @@ public partial class MainPage : ContentPage
     private IDispatcherTimer? _saveDebounce;
     private PortDragContext? _pendingPortConnect;
 
-    private static readonly string[] SolverIds = ["None", "Manual", "Basic"];
+    private static readonly string[] SolverIds = ["None", "Manual", "Basic", "Full"];
     private static readonly string[] PathIds = ["Curves", "Direct", "2D"];
     private static readonly StorageMode[] StorageModes =
         [StorageMode.PartiallyFull, StorageMode.Full, StorageMode.Empty, StorageMode.InputEqualsOutput];
@@ -133,7 +133,7 @@ public partial class MainPage : ContentPage
 
         SolverPicker.ItemsSource = new List<string>
         {
-            _loc.L("NONE_SOLVER"), _loc.L("MANUAL_SOLVER"), _loc.L("BASIC_SOLVER"),
+            _loc.L("NONE_SOLVER"), _loc.L("MANUAL_SOLVER"), _loc.L("BASIC_SOLVER"), _loc.L("FULL_SOLVER"),
         };
         PathStylePicker.ItemsSource = new List<string>
         {
@@ -171,6 +171,7 @@ public partial class MainPage : ContentPage
         AutosaveIntervalEntry.Text = _state.Settings.AutosaveIntervalMinutes.ToString();
         ColorWiresSwitch.IsToggled = _state.Settings.WireColorByPart;
         FocusHighlightSwitch.IsToggled = _state.Settings.FocusHighlight;
+        BeltCapacityWarningsSwitch.IsToggled = _state.Settings.ShowBeltCapacityWarnings;
 
         _initializing = wasInitializing;
         ApplyPlannerToggleControls();
@@ -213,6 +214,7 @@ public partial class MainPage : ContentPage
         PopupStorageLabel.Text = _loc.L("INTO_STORAGE");
         PopupVariantLabel.Text = _loc.L("MACHINE");
         PopupCapacityLabel.Text = _loc.L("TIER");
+        PopupCopySetupLabel.Text = "Copy machine setup";
         ToolTipProperties.SetText(PopupCutButton, _loc.L("CUT"));
         ToolTipProperties.SetText(PopupCopyButton, _loc.L("COPY"));
         ToolTipProperties.SetText(PopupPasteButton, _loc.L("PASTE"));
@@ -228,6 +230,7 @@ public partial class MainPage : ContentPage
         PathStyleLabel.Text = _loc.L("CONNECTION_STYLE");
         ColorWiresLabel.Text = "Colour wires by part";
         FocusHighlightLabel.Text = "Focus highlight on hover";
+        BeltCapacityWarningsLabel.Text = "Belt/pipe capacity warnings";
         SettingsMultipliersHeader.Text = _loc.L("CALCULATOR").ToUpperInvariant();
         SpaceElevatorMultLabel.Text = _loc.L("SPACE_ELEVATOR_MULTIPLIER");
         InputMultLabel.Text = _loc.L("INPUT_MULTIPLIER");
@@ -351,8 +354,25 @@ public partial class MainPage : ContentPage
             machines++;
             net += _state.Editor.Result.For(node).Power;
         }
+
+        // Count over-capacity connections when warnings are enabled.
+        var overCapacity = 0;
+        if (_state.Settings.ShowBeltCapacityWarnings)
+        {
+            foreach (var connection in _state.Editor.Graph.Connections)
+            {
+                var flow = _state.Editor.Result.FlowOf(connection);
+                if (flow <= Rational.Zero) continue;
+                var isFluid = _state.Data.PartsByName.TryGetValue(connection.Part, out var partDef) && partDef.Fluid;
+                var threshold = isFluid ? _state.Data.MaxPipeThroughput : _state.Data.MaxBeltThroughput;
+                if (Core.Model.ConnectionOverflowHelper.Check(flow, threshold) is not null)
+                    overCapacity++;
+            }
+        }
+
+        var overCapacityText = overCapacity > 0 ? $"   ·   {overCapacity} over-capacity" : string.Empty;
         StatusLabel.Text =
-            $"{machines} {_loc.L("MACHINES")}   ·   {_numbers.Summary(net)} MW   ·   {_loc.L(_state.Editor.Document.Solver.ToUpperInvariant() + "_SOLVER")}";
+            $"{machines} {_loc.L("MACHINES")}   ·   {_numbers.Summary(net)} MW   ·   {_loc.L(_state.Editor.Document.Solver.ToUpperInvariant() + "_SOLVER")}{overCapacityText}";
     }
 
     // --------------------------------------------------------- top toolbar

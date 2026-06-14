@@ -83,6 +83,15 @@ public partial class MainPage
         Canvas.Invalidate();
     }
 
+    private void OnBeltCapacityWarningsToggled(object? sender, ToggledEventArgs e)
+    {
+        if (_initializing) return;
+        _state.Settings.ShowBeltCapacityWarnings = e.Value;
+        _state.SaveSettings();
+        UpdateStatus();
+        Canvas.Invalidate();
+    }
+
     private void OnMultiplierChanged(object? sender, EventArgs e)
     {
         if (_initializing) return;

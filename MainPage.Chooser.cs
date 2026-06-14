@@ -77,6 +77,9 @@ public partial class MainPage
         ChooserFilterIcon.Source = _icons.GetSource(context.Part);
         ChooserFilterLabel.Text =
             $"{_loc.L(context.FromOutput ? "INPUTS" : "OUTPUTS")}: {_loc.L(context.Part)}";
+        // Backward (input-port) drag → offer to auto-plan the upstream supply.
+        ChooserAutoPlanButton.IsVisible = !context.FromOutput;
+        ChooserAutoPlanButton.Text = "⚡ Auto-Plan upstream";
     }
 
     private void OnChooserFilterCleared(object? sender, EventArgs e)

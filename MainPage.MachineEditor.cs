@@ -1,4 +1,5 @@
 using Ficsit.Schematics.Canvas;
+using Ficsit.Schematics.Core.Editing;
 using Ficsit.Schematics.Core.GameData;
 using Ficsit.Schematics.Core.Model;
 using Ficsit.Schematics.Core.Numerics;
@@ -126,6 +127,8 @@ public partial class MainPage
         PopupSloopRow.IsVisible = machine is { MaxProductionShards: > 0 };
         if (PopupSloopRow.IsVisible)
             PopupSloopValue.Text = $"{node.Somersloops} / {machine!.MaxProductionShards}";
+
+        PopupCopySetupRow.IsVisible = isRecipe;
 
         PopupAutoRoundRow.IsVisible = isRecipe;
         PopupAutoRoundSwitch.IsToggled = node.AutoRound;
@@ -361,6 +364,75 @@ public partial class MainPage
         var value = Math.Clamp(_popupNode.Somersloops + delta, 0, machine.MaxProductionShards);
         _state.Editor.SetProperty(_popupNode, "Somersloop", n => n.Somersloops, (n, v) => n.Somersloops = v, value);
         PopupSloopValue.Text = $"{_popupNode.Somersloops} / {machine.MaxProductionShards}";
+    }
+
+    // ------------------------------------------------------- copy-clock handlers
+
+    private void OnCopyClockClicked(object? sender, EventArgs e)
+    {
+        if (_popupNode is null) return;
+        var clockText = ClockClipboard.FormatClockPercent(_popupNode.ClockSpeed);
+        _ = CopyClockToClipboardAsync(clockText);
+    }
+
+    private void OnCopyAutoClockClicked(object? sender, EventArgs e)
+    {
+        if (_popupNode is null) return;
+        var (workload, count) = AutoRoundState(_popupNode);
+        if (!workload.IsPositive) return;
+        var clockText = ClockClipboard.FormatClockPercent(workload / count);
+        _ = CopyClockToClipboardAsync(clockText);
+    }
+
+    private async Task CopyClockToClipboardAsync(string clockText)
+    {
+        await Clipboard.SetTextAsync(clockText + "%");
+        ShowCopyToast($"Copied {clockText}%");
+    }
+
+    private void OnCopySetupClicked(object? sender, EventArgs e)
+    {
+        if (_popupNode is null) return;
+        var machine = MachineFor(_popupNode);
+        var machineName = machine?.Name ?? _popupNode.Name;
+        var recipeName = _loc.L(_popupNode.Name);
+
+        string clockText;
+        string countStr;
+        if (_popupNode.AutoRound)
+        {
+            var (workload, count) = AutoRoundState(_popupNode);
+            clockText = workload.IsPositive
+                ? ClockClipboard.FormatClockPercent(workload / count)
+                : ClockClipboard.FormatClockPercent(_popupNode.ClockSpeed);
+            countStr = workload.IsPositive ? count.Ceiling().ToString() : "?";
+        }
+        else
+        {
+            clockText = ClockClipboard.FormatClockPercent(_popupNode.ClockSpeed);
+            countStr = "1";
+        }
+
+        var sloopPart = machine is { MaxProductionShards: > 0 } && _popupNode.Somersloops > 0
+            ? $" · {_popupNode.Somersloops} Somersloop{(_popupNode.Somersloops == 1 ? "" : "s")}"
+            : string.Empty;
+
+        var summary = $"{machineName} · {recipeName} · ×{countStr} @ {clockText}%{sloopPart}";
+        _ = CopySetupToClipboardAsync(summary);
+    }
+
+    private async Task CopySetupToClipboardAsync(string summary)
+    {
+        await Clipboard.SetTextAsync(summary);
+        ShowCopyToast("Copied setup");
+    }
+
+    private void ShowCopyToast(string message)
+    {
+        CopyClockToastLabel.Text = message;
+        CopyClockToast.IsVisible = true;
+        Dispatcher.DispatchDelayed(TimeSpan.FromMilliseconds(1500), () =>
+            CopyClockToast.IsVisible = false);
     }
 
     private void OnAutoRoundToggled(object? sender, ToggledEventArgs e)

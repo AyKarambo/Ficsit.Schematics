@@ -1,4 +1,5 @@
 using Ficsit.Schematics.Core.Model;
+using Ficsit.Schematics.Core.Numerics;
 using Ficsit.Schematics.Core.Saves;
 using Ficsit.Schematics.Services;
 
@@ -64,7 +65,23 @@ public sealed partial class CanvasController
         if (connection is not null)
         {
             var flow = state.Editor.Result.FlowOf(connection);
-            return $"{loc.L(connection.Part)}: {numbers.ValueTooltip(flow)} {loc.L("PER_MINUTE")}";
+            var baseTooltip = $"{loc.L(connection.Part)}: {numbers.ValueTooltip(flow)} {loc.L("PER_MINUTE")}";
+
+            // Augment with over-capacity warning when the setting is on.
+            if (state.Settings.ShowBeltCapacityWarnings && flow > Rational.Zero)
+            {
+                var isFluid = state.Data.PartsByName.TryGetValue(connection.Part, out var partDef) && partDef.Fluid;
+                var threshold = isFluid ? state.Data.MaxPipeThroughput : state.Data.MaxBeltThroughput;
+                var overflow = ConnectionOverflowHelper.Check(flow, threshold);
+                if (overflow is not null)
+                {
+                    var kind = isFluid ? "pipe" : "belt";
+                    var markName = isFluid ? "Mk.2 pipe" : "Mk.6 belt";
+                    return $"{baseTooltip} — exceeds {markName} ({numbers.ValueTooltip(threshold)}/min) · needs {overflow.LinesNeeded} {kind}s";
+                }
+            }
+
+            return baseTooltip;
         }
 
         // Map mode: hovering a resource node shows what it is and who uses it.

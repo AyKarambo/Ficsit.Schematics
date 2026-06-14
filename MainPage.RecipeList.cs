@@ -1,6 +1,7 @@
 using Ficsit.Schematics.Canvas;
 using Ficsit.Schematics.Core.GameData;
 using Ficsit.Schematics.Core.Planning;
+using Ficsit.Schematics.Core.Saves;
 
 namespace Ficsit.Schematics;
 
@@ -113,14 +114,15 @@ public partial class MainPage
         if (_recipeListBuilt) return;
         _recipeListBuilt = true;
 
-        // Group by primary output part, in canonical game-data order.
+        // Group by machine (the new grouping) using the icon of the primary output part.
         foreach (var recipe in Data.Document.Recipes)
         {
             if (!recipe.Inputs.Any() || !recipe.Outputs.Any()) continue;
             if (recipe.Machine == "Space Elevator" || recipe.Ficsmas) continue;
-            var group = recipe.Outputs.First().Part;
-            var (check, row) = BuildRecipeRow(recipe, group);
-            _recipeListRows.Add((recipe, check, row, group));
+            var iconPart = recipe.Outputs.First().Part;
+            var (check, row) = BuildRecipeRow(recipe, iconPart);
+            // Store the machine name as the group key (was: primary output part).
+            _recipeListRows.Add((recipe, check, row, recipe.Machine));
         }
         RenderRecipeList(string.Empty);
     }
@@ -190,30 +192,31 @@ public partial class MainPage
     private void RenderRecipeList(string query)
     {
         RecipeListItems.Children.Clear();
-        string? lastGroup = null;
-        foreach (var (recipe, _, row, group) in _recipeListRows)
+        string? lastMachine = null;
+        foreach (var (recipe, _, row, machine) in _recipeListRows)
         {
-            if (query.Length > 0 && !RecipeMatches(recipe, group, query)) continue;
-            if (group != lastGroup)
+            if (query.Length > 0 && !RecipeMatches(recipe, machine, query)) continue;
+            if (machine != lastMachine)
             {
                 RecipeListItems.Children.Add(new Label
                 {
-                    Text = _loc.L(group),
+                    // Show localized machine name as the section header.
+                    Text = _loc.L(machine),
                     Style = (Style)Resources["SectionHeader"],
                     Margin = new Thickness(0, 6, 0, 0),
                 });
-                lastGroup = group;
+                lastMachine = machine;
             }
             RecipeListItems.Children.Add(row);
         }
     }
 
-    private bool RecipeMatches(RecipeDefinition recipe, string group, string query)
+    private bool RecipeMatches(RecipeDefinition recipe, string machine, string query)
     {
         bool Contains(string text)
             => text.Contains(query, StringComparison.OrdinalIgnoreCase)
                || _loc.L(text).Contains(query, StringComparison.OrdinalIgnoreCase);
-        return Contains(recipe.Name) || Contains(group);
+        return Contains(recipe.Name) || Contains(machine);
     }
 
     // --------------------------------------------------------- bulk actions
@@ -235,18 +238,45 @@ public partial class MainPage
     }
 
     /// <summary>
-    /// STUB — Phase 5 ("From save") is a separate spike. This wires the button
-    /// but the handler is a deliberate no-op. See docs/specs/from-save-spike.md:
-    /// it must read the selected save's purchased-schematics list and enable
-    /// exactly the unlocked alternates (standard recipes stay on).
+    /// "From save": read the selected save's purchased schematics and enable exactly the
+    /// alternate recipes it has unlocked (standard recipes stay on). Stems that can't be
+    /// matched to a catalog recipe are reported so the user can toggle them by hand. See
+    /// docs/specs/from-save-spike.md.
     /// </summary>
     private async void OnRecipeListFromSave(object? sender, EventArgs e)
     {
-        // TODO(from-save-spike): docs/specs/from-save-spike.md — read the
-        // schematic manager's mPurchasedSchematics out of the selected save,
-        // map schematic asset names to recipe names, and enable exactly those
-        // alternates. No-op until the spike lands.
-        await DisplayAlertAsync("Auto-Planner",
-            "“From save” is not available yet — coming with the save-import spike.", "OK");
+        try
+        {
+            var savType = new FilePickerFileType(new Dictionary<DevicePlatform, IEnumerable<string>>
+            {
+                [DevicePlatform.WinUI] = [".sav"],
+            });
+            var picked = await FilePicker.Default.PickAsync(new PickOptions
+            {
+                PickerTitle = "Satisfactory save (.sav)",
+                FileTypes = savType,
+            });
+            if (picked is null) return;
+
+            var stems = await Task.Run(() => SatisfactorySaveReader.ReadUnlockedAlternateSchematics(picked.FullPath));
+            var (unlocked, unrecognized) = SchematicRecipeMap.Match(Data, stems);
+
+            // Standard recipes stay on; disable every alternate the save has NOT unlocked.
+            DisabledRecipes.Clear();
+            foreach (var recipe in Data.Document.Recipes)
+                if (recipe.Alternate && !unlocked.Contains(recipe.Name))
+                    DisabledRecipes.Add(recipe.Name);
+            PersistDisabledRecipes();
+            SyncRecipeListChecks();
+
+            var message = $"Enabled {unlocked.Count} unlocked alternate recipe(s) from the save; standard recipes stay on.";
+            if (unrecognized.Count > 0)
+                message += $"\n{unrecognized.Count} unlocked schematic(s) couldn't be matched to a recipe — toggle those by hand if needed.";
+            await DisplayAlertAsync("From save", message, "OK");
+        }
+        catch (Exception ex)
+        {
+            await DisplayAlertAsync("From save", "Couldn't read that save: " + ex.Message, "OK");
+        }
     }
 }
