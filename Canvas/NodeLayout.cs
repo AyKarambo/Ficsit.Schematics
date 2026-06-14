@@ -105,6 +105,25 @@ public sealed class NodeLayout
             return specialty;
         }
 
+        // Outpost boundary handle: a small item badge. Import provides its part to the interior
+        // (output port on the right); Export consumes from the interior (input port on the left).
+        if (node.Kind is NodeKind.Import or NodeKind.Export)
+        {
+            var box = new RectF(x, y, SpecialtySize, SpecialtySize);
+            var handle = new NodeLayout
+            {
+                Node = node,
+                Bounds = box,
+                ImageRect = box.Inflate(-4, -4),
+                HasValueRow = false,
+                HasLimitRow = false,
+            };
+            var isImport = node.Kind == NodeKind.Import;
+            PlacePorts(isImport ? handle.Outputs : handle.Inputs, [node.Name],
+                isImport ? box.Right - PortSize : box.Left, box.Top, box.Height, isInput: !isImport);
+            return handle;
+        }
+
         List<string> inputParts = [];
         List<string> outputParts = [];
         if (node.Kind == NodeKind.Recipe && data.RecipesByName.TryGetValue(node.Name, out var recipe))

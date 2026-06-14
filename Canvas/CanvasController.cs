@@ -318,17 +318,20 @@ public sealed class CanvasController(AppState state, FactoryCanvasDrawable drawa
             return;
         }
 
-        // Dropping a wire on an outpost box crosses the boundary: open the outpost and offer
-        // to add the matching machine inside it (wired across — the new node inherits the
-        // outpost as its Parent via AddNode). Dragging a producer's output filters to consumers
-        // inside; dragging a consumer's input filters to producers inside.
+        // Dropping a wire on an outpost box connects the part to the outpost: it creates the
+        // boundary handle (a per-part Import/Export inside) and wires this node to it. The
+        // handle then shows up inside the outpost as a draggable item — no chooser.
         if (targetNode is not null && targetNode != _pressNode && _pressPort.Part != "AnyPart"
             && targetNode.Kind is NodeKind.Outpost or NodeKind.Blueprint
             && _pressNode.Kind is not (NodeKind.Outpost or NodeKind.Blueprint))
         {
-            state.Editor.EnterOutpost(targetNode);
-            OpenChooserForPort?.Invoke(
-                new PortDragContext(_pressNode, _pressPort.Part, !_pressPort.IsInput), screen);
+            var isImport = !_pressPort.IsInput; // a producer's output → import; a consumer's input → export
+            state.Editor.Commands.BeginGroup(isImport ? "Import to outpost" : "Export from outpost");
+            var handle = state.Editor.EnsureBoundary(targetNode, _pressPort.Part, isImport);
+            if (isImport) state.Editor.Connect(_pressNode, _pressPort.Part, handle);
+            else state.Editor.Connect(handle, _pressPort.Part, _pressNode);
+            state.Editor.Commands.EndGroup();
+            drawable.InvalidateLayouts();
             return;
         }
 

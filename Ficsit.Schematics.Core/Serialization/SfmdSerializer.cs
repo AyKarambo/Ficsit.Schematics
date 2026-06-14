@@ -82,6 +82,8 @@ public static class SfmdSerializer
             // Flat outpost membership: which outpost (by index) this node belongs to.
             if (node.Parent is not null && indexOf.TryGetValue(node.Parent, out var parentIndex))
                 obj["Parent"] = parentIndex;
+            // Boundary handles carry their kind explicitly (Name holds the part).
+            if (node.Kind is NodeKind.Import or NodeKind.Export) obj["Kind"] = node.Kind.ToString();
             if (node.Kind == NodeKind.StorageContainer && node.StorageMode != StorageMode.PartiallyFull)
                 obj["Mode"] = StorageModeName(node.StorageMode);
 
@@ -181,7 +183,10 @@ public static class SfmdSerializer
             var node = new FactoryNode
             {
                 Name = name,
-                Kind = KindFor(name),
+                Kind = obj["Kind"] is { } kindNode
+                    && Enum.TryParse<NodeKind>(GetString(kindNode, string.Empty), out var explicitKind)
+                    ? explicitKind
+                    : KindFor(name),
                 X = GetDouble(obj["X"], 0),
                 Y = GetDouble(obj["Y"], 0),
                 Title = obj["Title"]?.GetValue<string>(),

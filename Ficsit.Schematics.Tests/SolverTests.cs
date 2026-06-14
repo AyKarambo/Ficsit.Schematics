@@ -232,6 +232,44 @@ public class SolverTests
     }
 
     [Fact]
+    public void Import_handle_passes_flow_across_the_boundary()
+    {
+        // Outside miner → Import handle (boundary) → interior smelter. The handle passes its
+        // one part through, so 60 ore crosses and runs 2 smelters.
+        var doc = new FactoryDocument();
+        var miner = Node(doc, "Iron Ore", "60");
+        var outpost = Node(doc, "Outpost");
+        var import = new FactoryNode { Name = "Iron Ore", Kind = NodeKind.Import, Parent = outpost };
+        var smelter = new FactoryNode { Name = "Iron Ingot", Kind = NodeKind.Recipe, Max = "2", Parent = outpost };
+        doc.Root.Nodes.Add(import);
+        doc.Root.Nodes.Add(smelter);
+        Connect(doc, miner, "Iron Ore", import);
+        Connect(doc, import, "Iron Ore", smelter);
+
+        var result = Solve(doc);
+        Assert.Equal(new Rational(2), result.For(smelter).Count);
+        Assert.Equal(new Rational(60), result.For(import).DisplayValue);
+    }
+
+    [Fact]
+    public void Dropping_a_part_on_an_outpost_creates_an_import_handle()
+    {
+        var doc = new FactoryDocument();
+        var miner = Node(doc, "Iron Ore", "60");
+        var outpost = Node(doc, "Outpost");
+        var editor = new FactoryEditor(TestData.Database);
+        editor.LoadDocument(doc);
+
+        var handle = editor.EnsureBoundary(outpost, "Iron Ore", isImport: true);
+        editor.Connect(miner, "Iron Ore", handle);
+
+        Assert.Equal(NodeKind.Import, handle.Kind);
+        Assert.Equal(outpost, handle.Parent);
+        Assert.Same(handle, editor.EnsureBoundary(outpost, "Iron Ore", isImport: true)); // idempotent
+        Assert.Single(doc.Root.Connections, c => c.From == miner && c.To == handle); // wired across
+    }
+
+    [Fact]
     public void Power_is_negative_for_consumers()
     {
         var doc = new FactoryDocument();

@@ -351,6 +351,22 @@ public sealed class FactoryCanvasDrawable(AppState state, IconStore icons, Numbe
             return;
         }
 
+        // Outpost boundary handle: the part icon plus its single port (shown inside the outpost).
+        if (node.Kind is NodeKind.Import or NodeKind.Export)
+        {
+            canvas.FillColor = Theme.CardBackground;
+            canvas.FillRoundedRectangle(layout.Bounds, corner);
+            canvas.StrokeColor = selected ? Theme.SelectedBorder : Theme.CardBorder;
+            canvas.StrokeSize = selected ? 2f : 1f;
+            canvas.DrawRoundedRectangle(layout.Bounds, corner);
+            var partIcon = icons.GetImage(node.Name);
+            if (partIcon is not null)
+                canvas.DrawImage(partIcon, layout.ImageRect.X, layout.ImageRect.Y, layout.ImageRect.Width, layout.ImageRect.Height);
+            foreach (var port in layout.Inputs) DrawPort(canvas, layout, port, nodeResult);
+            foreach (var port in layout.Outputs) DrawPort(canvas, layout, port, nodeResult);
+            return;
+        }
+
         if (layout.MapCompact)
         {
             DrawMapCompact(canvas, layout, nodeResult, selected);

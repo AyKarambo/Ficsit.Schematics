@@ -98,6 +98,14 @@ internal sealed class NodeProfile
                 // Pure grouping ("bracket"): not a machine, excluded from the solve. Members
                 // (Parent == this outpost) are normal nodes solved as part of the flat graph.
                 break;
+
+            case NodeKind.Import:
+            case NodeKind.Export:
+                // Outpost boundary handle: passes its one part straight through (exterior supply
+                // on one side, interior demand on the other), so numbers cross the boundary.
+                profile.IsPassThrough = true;
+                profile.IsPpmDisplay = true;
+                break;
         }
 
         return profile;
