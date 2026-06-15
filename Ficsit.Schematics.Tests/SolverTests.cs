@@ -344,6 +344,74 @@ public class SolverTests
         Assert.Equal(Rational.Zero, result.For(outpost).Count);    // a bracket, not a machine
     }
 
+    // ------------------------------------------------------------ Generators (unified, any fuel)
+
+    private static FactoryNode Generator(FactoryDocument doc, string machine, string? max = null)
+    {
+        var node = new FactoryNode { Name = machine, Kind = NodeKind.Generator, Max = max };
+        doc.Root.Nodes.Add(node);
+        return node;
+    }
+
+    [Fact]
+    public void Generator_burns_the_connected_fuel_and_outputs_rated_power()
+    {
+        var doc = new FactoryDocument();
+        var supply = Node(doc, "Storage Container");
+        supply.StorageMode = StorageMode.Full; // open source of Fuel
+        var gen = Generator(doc, "Fuel-Powered Generator", "2");
+        Connect(doc, supply, "Fuel", gen);
+
+        var result = Solve(doc);
+        Assert.Equal(new Rational(2), result.For(gen).Count);    // 2 generators (the limit)
+        Assert.Equal(new Rational(500), result.For(gen).Power);  // 2 × 250 MW (positive = generates)
+        // Fuel Generator: In Fuel 1, Batch 3 → 20/min each → 40/min for two.
+        Assert.Equal(new Rational(40), result.For(gen).Inputs["Fuel"].Target);
+    }
+
+    [Fact]
+    public void Generator_accepts_a_different_fuel_at_that_fuels_rate()
+    {
+        var doc = new FactoryDocument();
+        var supply = Node(doc, "Storage Container");
+        supply.StorageMode = StorageMode.Full;
+        var gen = Generator(doc, "Fuel-Powered Generator", "1");
+        Connect(doc, supply, "Turbofuel", gen); // same machine, different fuel — just connect
+
+        var result = Solve(doc);
+        Assert.Equal(Rational.One, result.For(gen).Count);
+        // Turbofuel Generator: In Turbofuel 1, Batch 8 → 7.5/min each.
+        Assert.Equal(new Rational(15, 2), result.For(gen).Inputs["Turbofuel"].Target);
+    }
+
+    [Fact]
+    public void Generator_with_no_fuel_shows_rated_power_for_its_count()
+    {
+        var doc = new FactoryDocument();
+        var gen = Generator(doc, "Fuel-Powered Generator", "3");
+
+        var result = Solve(doc);
+        Assert.Equal(new Rational(3), result.For(gen).Count);    // a placed generator, no fuel yet
+        Assert.Equal(new Rational(750), result.For(gen).Power);  // 3 × 250 MW rated
+    }
+
+    [Fact]
+    public void Coal_generator_is_limited_by_its_water_supply()
+    {
+        // Coal Generator: In Coal 1 (Batch 4 → 15/min), In Water 3 (→ 45/min) per generator.
+        var doc = new FactoryDocument();
+        var coal = Node(doc, "Coal", "30");   // enough coal for 2 generators
+        var water = Node(doc, "Storage Container");
+        water.StorageMode = StorageMode.Full;
+        var gen = Generator(doc, "Coal-Powered Generator");
+        Connect(doc, coal, "Coal", gen);
+        Connect(doc, water, "Water", gen);
+
+        var result = Solve(doc);
+        Assert.Equal(new Rational(2), result.For(gen).Count);   // coal-limited to 2
+        Assert.Equal(new Rational(90), result.For(gen).Inputs["Water"].Target); // 2 × 45 water
+    }
+
     [Fact]
     public void Power_is_negative_for_consumers()
     {

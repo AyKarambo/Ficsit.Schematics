@@ -75,6 +75,23 @@ public static class SaveImport
                 continue;
             }
 
+            // A generator is one machine that burns any fuel; place it as the unified node — its
+            // fuel comes from the connection (added later), not a guessed recipe.
+            if (data.GeneratorMachines.Contains(machine))
+            {
+                nodes.Add(new FactoryNode
+                {
+                    Name = machine,
+                    Kind = NodeKind.Generator,
+                    X = building.X / CmPerUnit,
+                    Y = building.Y / CmPerUnit,
+                    ClockSpeed = building.ClockSpeed,
+                    Somersloops = building.Somersloops,
+                    Max = "1", // one physical generator
+                });
+                continue;
+            }
+
             // Other machine: take the next real recipe for this machine type (the k-th machine of a
             // type gets the k-th mCurrentRecipe of that type), else a best-effort first recipe.
             var recipe = recipeQueues.TryGetValue(machine, out var queue) && queue.Count > 0

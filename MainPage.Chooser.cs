@@ -136,16 +136,22 @@ public partial class MainPage
         Chooser.ClearPortFilter();
     }
 
-    private bool NodeAccepts(FactoryNode node, string part)
-        => node.Kind != NodeKind.Recipe
-           || (Data.RecipesByName.TryGetValue(node.Name, out var recipe)
-               && recipe.Inputs.Any(i => i.Part == part));
+    private bool NodeAccepts(FactoryNode node, string part) => node.Kind switch
+    {
+        NodeKind.Recipe => Data.RecipesByName.TryGetValue(node.Name, out var recipe)
+            && recipe.Inputs.Any(i => i.Part == part),
+        // A generator takes only one of its machine's fuels (or water), not any part.
+        NodeKind.Generator => Data.Document.Recipes.Any(r => r.Machine == node.Name && r.Inputs.Any(i => i.Part == part)),
+        _ => true,
+    };
 
     private bool NodeProvides(FactoryNode node, string part) => node.Kind switch
     {
         NodeKind.Recipe => Data.RecipesByName.TryGetValue(node.Name, out var recipe)
             && recipe.Outputs.Any(o => o.Part == part),
         NodeKind.AwesomeSink or NodeKind.DimensionalDepot => false,
+        // Generators produce power, not a connectable item (except nuclear waste).
+        NodeKind.Generator => Data.Document.Recipes.Any(r => r.Machine == node.Name && r.Outputs.Any(o => o.Part == part)),
         _ => true,
     };
 

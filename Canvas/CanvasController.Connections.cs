@@ -110,22 +110,37 @@ public sealed partial class CanvasController
         if (part is null or "AnyPart") return false;
         var resolvedPart = part;
 
-        // The consumer must accept the part: recipes need a matching input;
-        // specialty machines accept anything.
+        // The consumer must accept the part: recipes need a matching input; a generator burns
+        // (or takes, e.g. water) one of its machine's fuels; other specialty machines accept anything.
         if (to!.Kind == NodeKind.Recipe)
         {
             if (!state.Data.RecipesByName.TryGetValue(to.Name, out var recipe)
                 || recipe.Inputs.All(i => i.Part != resolvedPart))
                 return false;
         }
+        else if (to.Kind == NodeKind.Generator && !GeneratorTakes(to.Name, resolvedPart))
+            return false;
+
         if (from!.Kind == NodeKind.Recipe)
         {
             if (!state.Data.RecipesByName.TryGetValue(from.Name, out var recipe)
                 || recipe.Outputs.All(o => o.Part != resolvedPart))
                 return false;
         }
+        else if (from.Kind == NodeKind.Generator && !GeneratorEmits(from.Name, resolvedPart))
+            return false;
+
         return from != to;
     }
+
+    /// <summary>True when a generator machine accepts <paramref name="part"/> as a recipe input
+    /// (any fuel, or water).</summary>
+    private bool GeneratorTakes(string machine, string part)
+        => state.Data.Document.Recipes.Any(r => r.Machine == machine && r.Inputs.Any(i => i.Part == part));
+
+    /// <summary>True when a generator machine produces <paramref name="part"/> (e.g. nuclear waste).</summary>
+    private bool GeneratorEmits(string machine, string part)
+        => state.Data.Document.Recipes.Any(r => r.Machine == machine && r.Outputs.Any(o => o.Part == part));
 
     /// <summary>While dragging from a port, true when the pointer is over the pressed node's
     /// own port column on the same side (≥2 ports), meaning the gesture is a reorder rather

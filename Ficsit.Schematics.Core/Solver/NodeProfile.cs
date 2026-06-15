@@ -93,6 +93,10 @@ internal sealed class NodeProfile
                 profile.LimitCount = node.LimitValue is { } depotLimit ? depotLimit / profile.PpmUnit : null;
                 break;
 
+            case NodeKind.Generator:
+                BuildGeneratorProfile(profile, node, data, document);
+                break;
+
             case NodeKind.Outpost:
             case NodeKind.Blueprint:
                 // Pure grouping ("bracket"): not a machine, excluded from the solve. Members
@@ -103,6 +107,39 @@ internal sealed class NodeProfile
         return profile;
     }
 
+    /// <summary>
+    /// A unified generator burns whichever fuel is wired in: it runs that fuel's recipe (so a
+    /// single connected fuel behaves exactly like the per-fuel recipe — fuel/water in, power out,
+    /// waste out). With no fuel wired it shows the machine's rated power for the entered count.
+    /// </summary>
+    private static void BuildGeneratorProfile(NodeProfile profile, FactoryNode node, GameDatabase data, FactoryDocument document)
+    {
+        if (SelectGeneratorRecipe(node, data, document) is { } recipe)
+        {
+            ApplyRecipe(profile, node, data, document, recipe);
+            return;
+        }
+
+        profile.IsPpmDisplay = false;
+        profile.LimitCount = node.LimitValue;
+        if (data.MachinesByName.TryGetValue(node.Name, out var machine))
+        {
+            profile._machine = machine;
+            profile._powerMultiplier = GameDatabase.ParseOrZero(document.PowerMultiplier);
+            profile.PowerPerMachine = profile.PowerPerMachineAt(node.ClockSpeed);
+        }
+    }
+
+    /// <summary>The recipe a generator runs: the one whose fuel (its first input) is wired in.
+    /// The first connected fuel wins when several are present.</summary>
+    private static RecipeDefinition? SelectGeneratorRecipe(FactoryNode node, GameDatabase data, FactoryDocument document)
+    {
+        var connected = document.Root.Connections
+            .Where(c => c.To == node).Select(c => c.Part).ToHashSet();
+        return data.Document.Recipes.FirstOrDefault(
+            r => r.Machine == node.Name && r.Inputs.FirstOrDefault() is { } fuel && connected.Contains(fuel.Part));
+    }
+
     private static void BuildRecipeProfile(NodeProfile profile, FactoryNode node, GameDatabase data, FactoryDocument document)
     {
         if (!data.RecipesByName.TryGetValue(node.Name, out var recipe))
@@ -111,7 +148,11 @@ internal sealed class NodeProfile
             profile.LimitCount = node.LimitValue;
             return;
         }
+        ApplyRecipe(profile, node, data, document, recipe);
+    }
 
+    private static void ApplyRecipe(NodeProfile profile, FactoryNode node, GameDatabase data, FactoryDocument document, RecipeDefinition recipe)
+    {
         var family = data.MultiMachinesByName.TryGetValue(recipe.Machine, out var byFamily)
             ? byFamily
             : data.MultiMachineFor(recipe.Machine);

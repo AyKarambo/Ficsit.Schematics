@@ -23,6 +23,7 @@ public static class SfmdSerializer
     {
         "Outpost", "Blueprint", "Splurger", "Priority Splitter", "Priority Merger",
         "Priority Splurger", "AWESOME Sink", "Storage Container", "Dimensional Depot",
+        "Fuel-Powered Generator", "Coal-Powered Generator", "Nuclear Power Plant", "Biomass Burner",
     };
 
     public static string Serialize(FactoryDocument document)
@@ -283,6 +284,8 @@ public static class SfmdSerializer
         "AWESOME Sink" => NodeKind.AwesomeSink,
         "Storage Container" => NodeKind.StorageContainer,
         "Dimensional Depot" => NodeKind.DimensionalDepot,
+        "Fuel-Powered Generator" or "Coal-Powered Generator"
+            or "Nuclear Power Plant" or "Biomass Burner" => NodeKind.Generator,
         _ => NodeKind.Recipe,
     };
 

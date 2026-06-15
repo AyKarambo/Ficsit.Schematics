@@ -20,6 +20,15 @@ public sealed class GameDatabase
     public IReadOnlyDictionary<string, IReadOnlyList<RecipeDefinition>> RecipesByOutput { get; }
 
     /// <summary>
+    /// Machines that are unified fuel generators: they produce power and burn one of several
+    /// fuels (Fuel-Powered / Coal-Powered / Nuclear / Biomass Burner). Each is modeled as a
+    /// single node (<see cref="Model.NodeKind.Generator"/>) that accepts any of its fuels — the
+    /// fuel is the recipe's first input, and the connected fuel selects the active recipe. The
+    /// fuel-less Geothermal Generator (purity-driven) is excluded.
+    /// </summary>
+    public IReadOnlySet<string> GeneratorMachines { get; }
+
+    /// <summary>
     /// The highest belt throughput (parts/min) present in the catalog — derived from the
     /// Belt-mark capacities on machines such as the AWESOME Sink.  A future Mk.7 belt added
     /// to the catalog will automatically raise this threshold.
@@ -57,6 +66,15 @@ public sealed class GameDatabase
             .DefaultIfEmpty(new Rational(1200))
             .Max();
         MaxBeltThroughput = beltMax;
+
+        // A unified fuel generator: produces power and has recipes that burn a fuel (≥1 input).
+        var fuelMachines = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var recipe in document.Recipes)
+            if (recipe.Inputs.Any()
+                && MachinesByName.TryGetValue(recipe.Machine, out var machine)
+                && machine.AveragePowerValue.IsPositive)
+                fuelMachines.Add(recipe.Machine);
+        GeneratorMachines = fuelMachines;
     }
 
     /// <summary>

@@ -147,6 +147,19 @@ public class SfmdSerializerTests
     }
 
     [Fact]
+    public void Generator_node_roundtrips_as_a_unified_machine()
+    {
+        var doc = new FactoryDocument();
+        doc.Root.Nodes.Add(new FactoryNode { Name = "Fuel-Powered Generator", Kind = NodeKind.Generator, Max = "2" });
+
+        var reloaded = SfmdSerializer.Deserialize(SfmdSerializer.Serialize(doc));
+        var node = Assert.Single(reloaded.Root.Nodes);
+        Assert.Equal(NodeKind.Generator, node.Kind);
+        Assert.Equal("Fuel-Powered Generator", node.Name);
+        Assert.Equal("2", node.Max);
+    }
+
+    [Fact]
     public void Legacy_import_export_handles_migrate_to_direct_connections()
     {
         // Superseded boundary model: miner (root) → Import handle → smelter (member). The handle

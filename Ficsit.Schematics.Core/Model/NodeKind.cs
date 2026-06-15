@@ -12,4 +12,8 @@ public enum NodeKind
     AwesomeSink,
     StorageContainer,
     DimensionalDepot,
+
+    /// <summary>A power generator that burns any one of its machine's fuels. <see cref="FactoryNode.Name"/>
+    /// is the machine ("Fuel-Powered Generator", …); the active recipe follows the connected fuel.</summary>
+    Generator,
 }

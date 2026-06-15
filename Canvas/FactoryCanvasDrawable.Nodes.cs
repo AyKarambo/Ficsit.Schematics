@@ -269,6 +269,7 @@ public sealed partial class FactoryCanvasDrawable
             case NodeKind.AwesomeSink: return "AWESOME Sink";
             case NodeKind.StorageContainer: return "Storage Container";
             case NodeKind.DimensionalDepot: return "Dimensional Depot Uploader";
+            case NodeKind.Generator: return node.Name; // the machine, e.g. "Fuel-Powered Generator"
             default: return node.Name;
         }
     }

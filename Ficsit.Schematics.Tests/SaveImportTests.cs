@@ -119,6 +119,23 @@ public class SaveImportTests
     }
 
     [Fact]
+    public void Generator_buildings_import_as_unified_generator_nodes()
+    {
+        // A generator imports as one node that accepts any fuel — its fuel comes from connections
+        // (added later), not a guessed recipe (issue #10).
+        var world = new SaveWorld
+        {
+            Buildings = [new SaveBuilding { ClassName = "Build_GeneratorFuel_C", X = 1000, Y = 2000 }],
+        };
+
+        var node = Assert.Single(SaveImport.BuildNodes(world, TestData.Database));
+        Assert.Equal(NodeKind.Generator, node.Kind);
+        Assert.Equal("Fuel-Powered Generator", node.Name);
+        Assert.Null(node.ResourceNodeId);
+        Assert.Equal(10, node.X, 3);
+    }
+
+    [Fact]
     public void Unmodelled_classes_are_skipped()
     {
         var world = new SaveWorld

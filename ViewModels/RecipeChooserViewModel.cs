@@ -40,6 +40,9 @@ public sealed partial class RecipeChooserViewModel : ObservableObject
     [
         "Outpost", "Blueprint", "Splurger", "Priority Splitter", "Priority Merger",
         "Priority Splurger", "AWESOME Sink", "Storage Container", "Dimensional Depot",
+        // Unified fuel generators: one entry each, accepts any of its fuels (the per-fuel
+        // generator recipes are hidden from the recipe list below).
+        "Fuel-Powered Generator", "Coal-Powered Generator", "Nuclear Power Plant", "Biomass Burner",
     ];
 
     public RecipeChooserViewModel(AppState state, IconStore icons, LocalizationService loc)
@@ -75,10 +78,16 @@ public sealed partial class RecipeChooserViewModel : ObservableObject
         Specialty.Clear();
         foreach (var name in SpecialtyNames)
         {
-            // Sinks cannot produce anything, so hide them when hunting for a producer.
-            if (PortFilterPart is not null && !PortFilterForConsumers
-                && name is "AWESOME Sink" or "Dimensional Depot")
-                continue;
+            var isGenerator = _state.Data.GeneratorMachines.Contains(name);
+            if (PortFilterPart is { } specPart)
+            {
+                // Hunting for a producer of the part: sinks and generators don't produce it.
+                if (!PortFilterForConsumers && (isGenerator || name is "AWESOME Sink" or "Dimensional Depot"))
+                    continue;
+                // Hunting for a consumer: a generator must actually burn (or take) the part.
+                if (PortFilterForConsumers && isGenerator && !GeneratorAccepts(name, specPart))
+                    continue;
+            }
             Specialty.Add(new RecipeListItem
             {
                 Name = name,
@@ -91,6 +100,8 @@ public sealed partial class RecipeChooserViewModel : ObservableObject
         var query = SearchText.Trim();
         foreach (var recipe in _state.Data.Document.Recipes)
         {
+            // Per-fuel generator recipes are surfaced as one unified generator in Specialty.
+            if (_state.Data.GeneratorMachines.Contains(recipe.Machine)) continue;
             if (PortFilterPart is { } filterPart)
             {
                 var compatible = PortFilterForConsumers
@@ -120,6 +131,10 @@ public sealed partial class RecipeChooserViewModel : ObservableObject
             });
         }
     }
+
+    /// <summary>True when a unified generator machine burns or otherwise takes <paramref name="part"/>.</summary>
+    private bool GeneratorAccepts(string machine, string part)
+        => _state.Data.Document.Recipes.Any(r => r.Machine == machine && r.Inputs.Any(i => i.Part == part));
 
     private bool Matches(RecipeDefinition recipe, string query)
     {

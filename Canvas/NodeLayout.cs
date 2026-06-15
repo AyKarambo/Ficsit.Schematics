@@ -242,7 +242,8 @@ public sealed class NodeLayout
             : true;
         var providesOutputs = node.Kind switch
         {
-            NodeKind.AwesomeSink or NodeKind.DimensionalDepot => false,
+            // Generators output power, not a connectable item (nuclear waste shows once wired).
+            NodeKind.AwesomeSink or NodeKind.DimensionalDepot or NodeKind.Generator => false,
             NodeKind.StorageContainer => node.StorageMode != StorageMode.Empty,
             _ => true,
         };
