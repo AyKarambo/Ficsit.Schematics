@@ -312,6 +312,15 @@ public partial class MainPage : ContentPage
         if (editor.ScopePath.Count > 0)
         {
             var outpost = editor.ScopePath[^1];
+            // Members carry their real world positions; on first entry the outpost has no saved
+            // inner view (default pan/zoom = origin), which would leave imported members off-screen
+            // — so frame them. Once visited, the saved inner view is restored.
+            var unvisited = outpost.InnerZoom == 1.0 && outpost.InnerPanX == 0 && outpost.InnerPanY == 0;
+            if (unvisited && Canvas.Width > 0 && Canvas.Height > 0 && editor.VisibleNodes.Any())
+            {
+                _controller.ZoomToFit(new SizeF((float)Canvas.Width, (float)Canvas.Height));
+                return;
+            }
             _drawable.Zoom = (float)outpost.InnerZoom;
             _drawable.PanX = (float)outpost.InnerPanX;
             _drawable.PanY = (float)outpost.InnerPanY;

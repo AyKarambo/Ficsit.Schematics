@@ -23,7 +23,7 @@ public class SaveClusteringTests
 
         var outpost = Assert.Single(outposts);
         Assert.Equal(NodeKind.Outpost, outpost.Kind);
-        Assert.Equal("Iron Rod", outpost.Title); // dominant output (2 of 3)
+        Assert.Equal("Basic Iron Parts", outpost.Title); // iron-parts product line
         Assert.All(nodes, n => Assert.Same(outpost, n.Parent));
     }
 
@@ -39,10 +39,23 @@ public class SaveClusteringTests
         var outposts = SaveClustering.GroupByLocation(nodes, TestData.Database, radius: 80);
 
         Assert.Equal(2, outposts.Count);
-        Assert.Contains(outposts, o => o.Title == "Iron Rod");
-        Assert.Contains(outposts, o => o.Title == "Wire");
+        Assert.Contains(outposts, o => o.Title == "Basic Iron Parts");
+        Assert.Contains(outposts, o => o.Title == "Copper Parts");
         // No machine spans the two sites.
         Assert.All(nodes, n => Assert.NotNull(n.Parent));
+    }
+
+    [Fact]
+    public void Names_by_dominant_product_weighted_by_machine_count()
+    {
+        // One consolidated "Concrete ×10" node must outweigh two stray "Screw" nodes, so the
+        // outpost is named for what it mostly makes — not the more numerous nodes.
+        var concrete = Machine("Concrete", 0, 0);
+        concrete.Max = "10";
+        var nodes = new List<FactoryNode> { concrete, Machine("Screw", 10, 0), Machine("Screw", 20, 0) };
+
+        var outpost = Assert.Single(SaveClustering.GroupByLocation(nodes, TestData.Database, radius: 80));
+        Assert.Equal("Concrete", outpost.Title);
     }
 
     [Fact]

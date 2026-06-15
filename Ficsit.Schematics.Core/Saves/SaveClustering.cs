@@ -92,16 +92,43 @@ public static class SaveClustering
         return byRoot.Values.ToList();
     }
 
-    /// <summary>Name a cluster by its most common produced part (its dominant output), else "Outpost".</summary>
+    /// <summary>Friendly names for common product lines, so a cluster making iron parts reads
+    /// "Basic Iron Parts" rather than whichever single part happens to dominate.</summary>
+    private static readonly Dictionary<string, string> ProductCategories = new(StringComparer.Ordinal)
+    {
+        ["Iron Rod"] = "Basic Iron Parts", ["Iron Plate"] = "Basic Iron Parts", ["Screw"] = "Basic Iron Parts",
+        ["Reinforced Iron Plate"] = "Advanced Iron Parts", ["Modular Frame"] = "Advanced Iron Parts",
+        ["Rotor"] = "Advanced Iron Parts", ["Smart Plating"] = "Advanced Iron Parts",
+        ["Wire"] = "Copper Parts", ["Cable"] = "Copper Parts", ["Copper Sheet"] = "Copper Parts",
+        ["Steel Beam"] = "Steel Parts", ["Steel Pipe"] = "Steel Parts",
+        ["Encased Industrial Beam"] = "Steel Parts",
+    };
+
+    /// <summary>
+    /// Name a cluster by what it actually makes: the part produced by the most machines that
+    /// isn't consumed again inside the cluster (its net product), mapped to a friendly category
+    /// when one fits. Weighting by machine count (not node count) means a "Concrete ×10" node
+    /// outranks a couple of stray "Screw" nodes.
+    /// </summary>
     private static string OutpostName(List<FactoryNode> cluster, GameDatabase data)
     {
-        var counts = new Dictionary<string, int>();
+        var produced = new Dictionary<string, int>();
+        var consumed = new HashSet<string>();
+        var generators = 0;
         foreach (var node in cluster)
-            if (data.RecipesByName.TryGetValue(node.Name, out var recipe)
-                && recipe.Outputs.FirstOrDefault() is { } output)
-                counts[output.Part] = counts.GetValueOrDefault(output.Part) + 1;
-        return counts.Count == 0
-            ? "Outpost"
-            : counts.OrderByDescending(kv => kv.Value).ThenBy(kv => kv.Key).First().Key;
+        {
+            if (node.Kind == NodeKind.Generator) { generators++; continue; }
+            if (!data.RecipesByName.TryGetValue(node.Name, out var recipe)) continue;
+            var count = int.TryParse(node.Max, out var m) ? Math.Max(m, 1) : 1;
+            foreach (var output in recipe.Outputs) produced[output.Part] = produced.GetValueOrDefault(output.Part) + count;
+            foreach (var input in recipe.Inputs) consumed.Add(input.Part);
+        }
+        if (produced.Count == 0) return generators > 0 ? "Power" : "Outpost";
+
+        // Prefer net products (made here, not consumed here); fall back to everything produced.
+        var net = produced.Where(kv => !consumed.Contains(kv.Key)).ToList();
+        var pool = net.Count > 0 ? net : [.. produced];
+        var dominant = pool.OrderByDescending(kv => kv.Value).ThenBy(kv => kv.Key).First().Key;
+        return ProductCategories.GetValueOrDefault(dominant, dominant);
     }
 }
