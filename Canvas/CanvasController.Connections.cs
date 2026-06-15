@@ -28,37 +28,26 @@ public sealed partial class CanvasController
             return;
         }
 
-        // Dropping a wire on an outpost box connects the part to the outpost: it creates the
-        // boundary handle (a per-part Import/Export inside) and wires this node to it. The
-        // handle then shows up inside the outpost as a draggable item — no chooser.
+        // Dropping a wire on an outpost box (at root) crosses the boundary: wire this node to a
+        // member that can take/give the part. The crossing is a normal node→node connection — the
+        // box port and the interior edge marker are auto-derived from it, no stored handle.
         if (targetNode is not null && targetNode != _pressNode && _pressPort.Part != "AnyPart"
             && targetNode.Kind is NodeKind.Outpost or NodeKind.Blueprint
             && _pressNode.Kind is not (NodeKind.Outpost or NodeKind.Blueprint))
         {
-            var isImport = !_pressPort.IsInput; // a producer's output → import; a consumer's input → export
-            state.Editor.Commands.BeginGroup(isImport ? "Import to outpost" : "Export from outpost");
-            var handle = state.Editor.EnsureBoundary(targetNode, _pressPort.Part, isImport);
-            if (isImport) state.Editor.Connect(_pressNode, _pressPort.Part, handle);
-            else state.Editor.Connect(handle, _pressPort.Part, _pressNode);
-            state.Editor.Commands.EndGroup();
-            drawable.InvalidateLayouts();
+            var producerSide = !_pressPort.IsInput; // dropping an output feeds a member (it consumes)
+            var member = FirstMemberForPart(targetNode, _pressPort.Part, wantConsumer: producerSide);
+            if (member is not null)
+            {
+                if (producerSide) state.Editor.Connect(_pressNode, _pressPort.Part, member);
+                else state.Editor.Connect(member, _pressPort.Part, _pressNode);
+                drawable.InvalidateLayouts();
+            }
             return;
         }
 
         if (targetNode is null)
         {
-            // Inside an outpost, releasing near an edge declares a boundary: a machine input on
-            // the left rail becomes an Import (fed from outside), an output on the right an Export.
-            if (EdgeZoneFor(screen) is { } left && state.Editor.ActiveOutpost is { } outpost)
-            {
-                state.Editor.Commands.BeginGroup(left ? "Add import" : "Add export");
-                var handle = state.Editor.EnsureBoundary(outpost, _pressPort.Part, isImport: left);
-                if (left) state.Editor.Connect(handle, _pressPort.Part, _pressNode);
-                else state.Editor.Connect(_pressNode, _pressPort.Part, handle);
-                state.Editor.Commands.EndGroup();
-                drawable.InvalidateLayouts();
-                return;
-            }
             // Dropped on empty canvas: offer compatible recipes for this port.
             OpenChooserForPort?.Invoke(
                 new PortDragContext(_pressNode, _pressPort.Part, !_pressPort.IsInput), screen);
@@ -70,6 +59,21 @@ public sealed partial class CanvasController
             state.Editor.Connect(fromNode!, partName!, toNode!);
             drawable.InvalidateLayouts();
         }
+    }
+
+    /// <summary>First member of <paramref name="outpost"/> (at any depth) that can take or give
+    /// <paramref name="part"/>: a recipe whose inputs (when <paramref name="wantConsumer"/>) or
+    /// outputs include it. Used to land a wire dropped on the outpost box onto a real member.</summary>
+    private FactoryNode? FirstMemberForPart(FactoryNode outpost, string part, bool wantConsumer)
+    {
+        foreach (var n in state.Editor.Graph.Nodes)
+        {
+            if (n.Kind != NodeKind.Recipe || !NodeLayout.IsInside(n, outpost)) continue;
+            if (!state.Data.RecipesByName.TryGetValue(n.Name, out var recipe)) continue;
+            if (wantConsumer ? recipe.Inputs.Any(i => i.Part == part) : recipe.Outputs.Any(o => o.Part == part))
+                return n;
+        }
+        return null;
     }
 
     /// <summary>

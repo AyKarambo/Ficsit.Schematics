@@ -38,11 +38,7 @@ public sealed partial class FactoryCanvasDrawable(AppState state, IconStore icon
     /// a short bar between ports.</summary>
     public (float X, float Y, float Width)? PortInsertLine { get; set; }
 
-    /// <summary>While dragging a wire inside an outpost toward an edge: true = left (make an
-    /// input boundary), false = right (output), null = no edge hint. Drawn as a rail highlight.</summary>
-    public bool? EdgeDropZone { get; set; }
-
-    /// <summary>Last drawn viewport width (screen px), for edge-zone hit-testing.</summary>
+    /// <summary>Last drawn viewport width (screen px).</summary>
     public float ViewportWidth => _viewport.Width;
 
     /// <summary>True when the world map underlay and resource markers are active (root scope).</summary>
@@ -51,13 +47,7 @@ public sealed partial class FactoryCanvasDrawable(AppState state, IconStore icon
     private readonly Dictionary<FactoryNode, NodeLayout> _layouts = [];
     private bool _layoutsDirty = true;
 
-    // Outpost boundary handles are pinned to the canvas edges (imports left, exports right) so
-    // they stay put while the interior pans/zooms. Stored in screen pixels; the layout converts
-    // to world per frame (the controller re-invalidates layouts on pan/zoom inside an outpost).
     private SizeF _viewport;
-    private const float RailMarginPx = 16f;
-    private const float RailTopPx = 112f;
-    private const float RailGapPx = 12f;
 
     // Text measurement is the dominant per-frame cost when panning (one GetStringSize per
     // port/connection label per frame). The size of a given (text, fontSize) pair never
@@ -76,28 +66,9 @@ public sealed partial class FactoryCanvasDrawable(AppState state, IconStore icon
                 _layouts.Clear();
                 var graph = state.Editor.Graph;
                 var mapCompact = MapActive;
-                var importIndex = 0;
-                var exportIndex = 0;
                 // Only the nodes in the current scope (members of the active outpost) are laid out.
                 foreach (var node in state.Editor.VisibleNodes)
-                {
-                    if (node.Kind is NodeKind.Import or NodeKind.Export)
-                    {
-                        var isImport = node.Kind == NodeKind.Import;
-                        var i = isImport ? importIndex++ : exportIndex++;
-                        var sizePx = NodeLayout.SpecialtySize * Zoom;
-                        var screenX = isImport
-                            ? RailMarginPx
-                            : MathF.Max(RailMarginPx, _viewport.Width - RailMarginPx - sizePx);
-                        var screenY = RailTopPx + i * (sizePx + RailGapPx);
-                        var world = ScreenToWorld(new PointF(screenX, screenY));
-                        _layouts[node] = NodeLayout.Compute(node, state.Data, graph, mapCompact, world);
-                    }
-                    else
-                    {
-                        _layouts[node] = NodeLayout.Compute(node, state.Data, graph, mapCompact);
-                    }
-                }
+                    _layouts[node] = NodeLayout.Compute(node, state.Data, graph, mapCompact);
                 _layoutsDirty = false;
             }
             return _layouts;

@@ -130,13 +130,6 @@ public sealed class BasicSolver(GameDatabase data) : ISolver
                     ? SumConsumerRequests(node, outConns, states, incoming, flows)
                     : Rational.Zero;
 
-            // A boundary handle whose exterior side isn't wired yet acts open: an Export with no
-            // external consumer is an open sink (so the interior's production still shows), an
-            // Import with no external supplier is an open source. Once the exterior is connected,
-            // that flow constrains the handle normally.
-            if (node.Kind == NodeKind.Export && outConns.Count == 0) demand = null;
-            else if (node.Kind == NodeKind.Import && inConns.Count == 0) supply = null;
-
             var value = MinN(MinN(supply, demand), limitPpm);
             if (profile.IsOpenSink && !profile.IsPassThrough)
                 value = MinN(SumKnown(inConns, flows), limitPpm); // sinks absorb what arrives

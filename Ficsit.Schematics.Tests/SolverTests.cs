@@ -309,65 +309,39 @@ public class SolverTests
     }
 
     [Fact]
-    public void Import_handle_passes_flow_across_the_boundary()
+    public void Outpost_member_exports_across_the_boundary()
     {
-        // Outside miner → Import handle (boundary) → interior smelter. The handle passes its
-        // one part through, so 60 ore crosses and runs 2 smelters.
+        // Flat model: a member produces to a node outside the outpost as an ordinary connection —
+        // no Import/Export handle. 60 ore crosses out of the outpost and runs 2 smelters.
         var doc = new FactoryDocument();
-        var miner = Node(doc, "Iron Ore", "60");
         var outpost = Node(doc, "Outpost");
-        var import = new FactoryNode { Name = "Iron Ore", Kind = NodeKind.Import, Parent = outpost };
-        var smelter = new FactoryNode { Name = "Iron Ingot", Kind = NodeKind.Recipe, Max = "2", Parent = outpost };
-        doc.Root.Nodes.Add(import);
-        doc.Root.Nodes.Add(smelter);
-        Connect(doc, miner, "Iron Ore", import);
-        Connect(doc, import, "Iron Ore", smelter);
+        var miner = Node(doc, "Iron Ore", "60");
+        miner.Parent = outpost;                  // member
+        var smelter = Node(doc, "Iron Ingot");   // root, pulls the ore out
+        Connect(doc, miner, "Iron Ore", smelter);
 
         var result = Solve(doc);
         Assert.Equal(new Rational(2), result.For(smelter).Count);
-        Assert.Equal(new Rational(60), result.For(import).DisplayValue);
+        Assert.Equal(new Rational(60), result.Flows[doc.Root.Connections.Single()]);
     }
 
     [Fact]
-    public void Dropping_a_part_on_an_outpost_creates_an_import_handle()
+    public void Crossing_connection_runs_both_directions_through_a_nested_outpost()
     {
+        // miner (root) → smelter (member) → constructor (root): flow crosses in and back out of
+        // the outpost, both as plain connections. The outpost itself stays inert.
         var doc = new FactoryDocument();
-        var miner = Node(doc, "Iron Ore", "60");
         var outpost = Node(doc, "Outpost");
-        var editor = new FactoryEditor(TestData.Database);
-        editor.LoadDocument(doc);
-
-        var handle = editor.EnsureBoundary(outpost, "Iron Ore", isImport: true);
-        editor.Connect(miner, "Iron Ore", handle);
-
-        Assert.Equal(NodeKind.Import, handle.Kind);
-        Assert.Equal(outpost, handle.Parent);
-        Assert.Same(handle, editor.EnsureBoundary(outpost, "Iron Ore", isImport: true)); // idempotent
-        Assert.Single(doc.Root.Connections, c => c.From == miner && c.To == handle); // wired across
-    }
-
-    [Fact]
-    public void Export_with_no_external_consumer_still_shows_interior_production()
-    {
-        // miner → Import → smelter → Export, with nothing wired to the export's outside. A
-        // dangling export acts as an open sink, so production still flows (it must not zero the
-        // whole chain back to the miner) and both boundary handles report their real rate.
-        var doc = new FactoryDocument();
         var miner = Node(doc, "Iron Ore", "60");
-        var outpost = Node(doc, "Outpost");
-        var import = new FactoryNode { Name = "Iron Ore", Kind = NodeKind.Import, Parent = outpost };
-        var smelter = new FactoryNode { Name = "Iron Ingot", Kind = NodeKind.Recipe, Parent = outpost };
-        var export = new FactoryNode { Name = "Iron Ingot", Kind = NodeKind.Export, Parent = outpost };
-        doc.Root.Nodes.Add(import);
-        doc.Root.Nodes.Add(smelter);
-        doc.Root.Nodes.Add(export);
-        Connect(doc, miner, "Iron Ore", import);
-        Connect(doc, import, "Iron Ore", smelter);
-        Connect(doc, smelter, "Iron Ingot", export);
+        var smelter = Node(doc, "Iron Ingot");
+        smelter.Parent = outpost;
+        var rod = Node(doc, "Iron Rod");
+        Connect(doc, miner, "Iron Ore", smelter);
+        Connect(doc, smelter, "Iron Ingot", rod);
 
         var result = Solve(doc);
-        Assert.Equal(new Rational(60), result.For(import).DisplayValue); // 60 ore still pulled in
-        Assert.Equal(new Rational(60), result.For(export).DisplayValue); // 60 ingot crosses out
+        Assert.Equal(new Rational(2), result.For(smelter).Count);  // 60 ore → 2 smelters → 60 ingot
+        Assert.Equal(Rational.Zero, result.For(outpost).Count);    // a bracket, not a machine
     }
 
     [Fact]

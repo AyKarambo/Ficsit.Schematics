@@ -82,8 +82,6 @@ public static class SfmdSerializer
             // Flat outpost membership: which outpost (by index) this node belongs to.
             if (node.Parent is not null && indexOf.TryGetValue(node.Parent, out var parentIndex))
                 obj["Parent"] = parentIndex;
-            // Boundary handles carry their kind explicitly (Name holds the part).
-            if (node.Kind is NodeKind.Import or NodeKind.Export) obj["Kind"] = node.Kind.ToString();
             if (node.Kind == NodeKind.StorageContainer && node.StorageMode != StorageMode.PartiallyFull)
                 obj["Mode"] = StorageModeName(node.StorageMode);
 
@@ -160,8 +158,31 @@ public static class SfmdSerializer
     private static FactoryGraph DeserializeGraph(JsonArray data)
     {
         var graph = new FactoryGraph();
-        ReadArray(data, graph, parent: null);
+        var legacyHandles = new List<FactoryNode>();
+        ReadArray(data, graph, parent: null, legacyHandles);
+        BypassLegacyHandles(graph, legacyHandles);
         return graph;
+    }
+
+    /// <summary>
+    /// Migrate the superseded Import/Export boundary handles: an outpost boundary is now derived
+    /// from crossing connections, so a saved handle (an <c>X → handle → Y</c> pass-through of one
+    /// part) is replaced by the direct <c>X → Y</c> connection it stood for, then dropped. A
+    /// dangling handle (one side unwired) simply disappears with its half-connection.
+    /// </summary>
+    private static void BypassLegacyHandles(FactoryGraph graph, List<FactoryNode> handles)
+    {
+        foreach (var handle in handles)
+        {
+            var incoming = graph.Connections.Where(c => c.To == handle).ToList();
+            var outgoing = graph.Connections.Where(c => c.From == handle).ToList();
+            foreach (var into in incoming)
+                foreach (var outOf in outgoing)
+                    if (into.Part == outOf.Part && into.From != outOf.To
+                        && !graph.Connections.Any(c => c.From == into.From && c.To == outOf.To && c.Part == into.Part))
+                        graph.Connections.Add(new NodeConnection { From = into.From, To = outOf.To, Part = into.Part });
+        }
+        foreach (var handle in handles) graph.RemoveNode(handle); // also drops the handle's own connections
     }
 
     /// <summary>
@@ -169,8 +190,10 @@ public static class SfmdSerializer
     /// <c>Parent</c> gives outpost membership by index, <c>Inputs</c> reference indices in this
     /// array) and the legacy nested format (an outpost carries a nested <c>Data</c> array with
     /// indices local to it) — nested children are flattened in with their <c>Parent</c> set.
+    /// Saved Import/Export handles (the superseded boundary model) are collected into
+    /// <paramref name="legacyHandles"/> for <see cref="BypassLegacyHandles"/>.
     /// </summary>
-    private static void ReadArray(JsonArray data, FactoryGraph graph, FactoryNode? parent)
+    private static void ReadArray(JsonArray data, FactoryGraph graph, FactoryNode? parent, List<FactoryNode> legacyHandles)
     {
         var local = new List<FactoryNode>();
         var pendingInputs = new List<(FactoryNode Node, string Part, List<int> Sources)>();
@@ -198,6 +221,11 @@ public static class SfmdSerializer
                 ResourceNodeId = obj["ResourceNode"]?.GetValue<string>(),
                 Parent = parent,
             };
+
+            // Superseded boundary handles: parsed as ordinary nodes (their Name is a part), then
+            // migrated away by BypassLegacyHandles once all connections are wired.
+            if (obj["Kind"] is { } rawKindNode && GetString(rawKindNode, string.Empty) is "Import" or "Export")
+                legacyHandles.Add(node);
 
             if (obj["Ppm"] is JsonValue ppm) node.ShowPpm = ppm.GetValue<bool>();
             if (obj["ClockSpeed"] is JsonValue clock
@@ -230,7 +258,7 @@ public static class SfmdSerializer
 
             // Legacy nested outpost: flatten its children in with Parent = this node.
             if (obj["Data"] is JsonArray nested)
-                ReadArray(nested, graph, node);
+                ReadArray(nested, graph, node, legacyHandles);
         }
 
         // Indices reference positions within THIS array (flat for the new format, local nested).

@@ -153,33 +153,6 @@ public sealed class FactoryEditor
         return node;
     }
 
-    /// <summary>Ensure an outpost has a boundary handle for <paramref name="part"/> — Import
-    /// brings it in, Export sends it out — creating it as a member (positioned on the left/right
-    /// of the interior) if missing. Returns the handle. Idempotent.</summary>
-    public FactoryNode EnsureBoundary(FactoryNode outpost, string part, bool isImport)
-    {
-        var kind = isImport ? NodeKind.Import : NodeKind.Export;
-        var existing = Document.Root.Nodes
-            .FirstOrDefault(n => n.Parent == outpost && n.Kind == kind && n.Name == part);
-        if (existing is not null) return existing;
-
-        var members = Document.Root.MembersOf(outpost).ToList();
-        var sameKind = members.Count(n => n.Kind == kind);
-        var baseX = members.Count == 0 ? 0
-            : isImport ? members.Min(n => n.X) - 180 : members.Max(n => n.X) + 180;
-        var baseY = (members.Count == 0 ? 0 : members.Min(n => n.Y)) + sameKind * 70;
-
-        var node = new FactoryNode { Name = part, Kind = kind, Parent = outpost, X = baseX, Y = baseY };
-        var graph = Document.Root;
-        Commands.Push(new EditCommand
-        {
-            Label = $"Add {(isImport ? "import" : "export")} {part}",
-            Apply = () => { if (!graph.Nodes.Contains(node)) graph.Nodes.Add(node); },
-            Revert = () => graph.RemoveNode(node),
-        });
-        return node;
-    }
-
     public void DeleteNodes(IReadOnlyList<FactoryNode> nodes)
     {
         if (nodes.Count == 0) return;
@@ -222,16 +195,13 @@ public sealed class FactoryEditor
     /// Collapse <paramref name="nodes"/> (members of the current scope) into a new
     /// outpost, as one undoable step. Reparenting only — the flat solver keeps every
     /// real connection, so flows are unchanged and the machines simply render inside
-    /// the outpost box. Boundary handles are left out of the group. Returns the new
-    /// outpost, or null if nothing groupable was passed.
+    /// the outpost box. Returns the new outpost, or null if nothing groupable was passed.
     /// </summary>
     public FactoryNode? GroupIntoOutpost(IReadOnlyList<FactoryNode> nodes, string? title)
     {
         var graph = Document.Root;
         var members = nodes
-            .Where(n => n.Parent == ActiveOutpost
-                && n.Kind is not (NodeKind.Import or NodeKind.Export)
-                && graph.Nodes.Contains(n))
+            .Where(n => n.Parent == ActiveOutpost && graph.Nodes.Contains(n))
             .Distinct()
             .ToList();
         if (members.Count == 0) return null;

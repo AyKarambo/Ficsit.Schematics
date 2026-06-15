@@ -31,7 +31,6 @@ public sealed partial class CanvasController
         drawable.PanX = screen.X - world.X * newZoom;
         drawable.PanY = screen.Y - world.Y * newZoom;
         SyncPanToDocument();
-        RepinEdgeHandles();
         Invalidate?.Invoke();
     }
 
@@ -117,15 +116,7 @@ public sealed partial class CanvasController
         drawable.PanX += dx;
         drawable.PanY += dy;
         SyncPanToDocument();
-        RepinEdgeHandles();
         Invalidate?.Invoke();
-    }
-
-    /// <summary>Outpost boundary handles are pinned to the canvas edge, so their world position
-    /// is derived from pan/zoom — re-lay them out whenever the view moves inside an outpost.</summary>
-    private void RepinEdgeHandles()
-    {
-        if (state.Editor.ActiveOutpost is not null) drawable.InvalidateLayouts();
     }
 
     private void SyncPanToDocument()

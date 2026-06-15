@@ -145,4 +145,30 @@ public class SfmdSerializerTests
         Assert.Same(concrete, conn.To);
         Assert.Equal("Limestone", conn.Part);
     }
+
+    [Fact]
+    public void Legacy_import_export_handles_migrate_to_direct_connections()
+    {
+        // Superseded boundary model: miner (root) → Import handle → smelter (member). The handle
+        // is dropped and replaced by the direct miner → smelter connection it stood for, so the
+        // flat graph carries no Import/Export nodes.
+        const string json = """
+            {"Version":"1.0","Data":[
+              {"Name":"Iron Ore","X":0,"Y":0,"Max":"60"},
+              {"Name":"Outpost","X":50,"Y":0},
+              {"Name":"Iron Ore","X":40,"Y":0,"Kind":"Import","Parent":1,"Inputs":{"Iron Ore":[0]}},
+              {"Name":"Iron Ingot","X":80,"Y":0,"Parent":1,"Inputs":{"Iron Ore":[2]}}
+            ]}
+            """;
+        var doc = SfmdSerializer.Deserialize(json);
+
+        Assert.Equal(3, doc.Root.Nodes.Count); // miner, outpost, smelter — the handle is gone
+        var miner = doc.Root.Nodes.First(n => n.Name == "Iron Ore");
+        var smelter = doc.Root.Nodes.Single(n => n.Name == "Iron Ingot");
+        var conn = Assert.Single(doc.Root.Connections);
+        Assert.Same(miner, conn.From);
+        Assert.Same(smelter, conn.To);
+        Assert.Equal("Iron Ore", conn.Part);
+        Assert.Same(doc.Root.Nodes.Single(n => n.Kind == NodeKind.Outpost), smelter.Parent);
+    }
 }

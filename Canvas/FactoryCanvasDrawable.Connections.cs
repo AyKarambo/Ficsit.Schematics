@@ -14,6 +14,12 @@ public sealed partial class FactoryCanvasDrawable
     // Red tint for over-capacity connections.
     private static readonly Color OverCapacityColor = Color.FromArgb("#CC3300");
 
+    // An auto-derived outpost boundary marker (no stored handle): a small chip at the member's
+    // port for a connection that crosses the active outpost's boundary (incoming on the left,
+    // outgoing on the right). The wire runs member-port ↔ marker.
+    private const float BoundaryMarkerSize = 20f;
+    private const float BoundaryMarkerGap = 26f;
+
     private void DrawConnection(
         ICanvas canvas,
         NodeConnection connection,
@@ -22,7 +28,17 @@ public sealed partial class FactoryCanvasDrawable
     {
         var fromNode = VisibleRep(connection.From);
         var toNode = VisibleRep(connection.To);
-        if (fromNode is null || toNode is null || fromNode == toNode) return;
+        if (fromNode == toNode) return; // wholly inside one box, or both outside this scope
+
+        // A connection with exactly one end in the current scope crosses the active outpost's
+        // boundary: draw the member side to an auto-derived edge marker.
+        if (state.Editor.ActiveOutpost is not null && fromNode is null != (toNode is null))
+        {
+            DrawCrossingConnection(canvas, connection, layouts, result, incoming: toNode is not null);
+            return;
+        }
+
+        if (fromNode is null || toNode is null) return;
         if (!layouts.TryGetValue(fromNode, out var fromLayout)
             || !layouts.TryGetValue(toNode, out var toLayout))
             return;
@@ -53,6 +69,70 @@ public sealed partial class FactoryCanvasDrawable
             : state.Settings.WireColorByPart ? PartPalette.ColorFor(connection.Part) : Theme.Wire;
         canvas.StrokeSize = overflow is not null ? 3f : 2f;
 
+        var mid = DrawWirePath(canvas, start, end);
+
+        // Mid label: part icon + flow ppm — pill treatment (Slice B #3).
+        var icon = icons.GetImage(connection.Part);
+        const float iconSize = 16f;
+        if (icon is not null)
+            canvas.DrawImage(icon, mid.X - iconSize - 2, mid.Y - iconSize / 2, iconSize, iconSize);
+        // The label sits to the right of the icon, centred on mid.Y.
+        DrawLabelPill(canvas, numbers.Connection(flow), mid.X, mid.Y, anchorRight: false);
+
+        // Over-capacity warning: a small warning glyph (⚠) above the mid-point.
+        if (overflow is not null)
+            DrawOverCapacityWarning(canvas, mid, overflow);
+    }
+
+    /// <summary>
+    /// Draw a boundary-crossing connection inside an outpost: the member's port wired to a small
+    /// edge marker carrying the crossing part. <paramref name="incoming"/> = a part fed in from
+    /// outside (marker on the member's input, left); otherwise a part sent out (output, right).
+    /// </summary>
+    private void DrawCrossingConnection(
+        ICanvas canvas,
+        NodeConnection connection,
+        IReadOnlyDictionary<FactoryNode, NodeLayout> layouts,
+        SolveResult result,
+        bool incoming)
+    {
+        var memberNode = incoming ? VisibleRep(connection.To) : VisibleRep(connection.From);
+        if (memberNode is null || !layouts.TryGetValue(memberNode, out var layout)) return;
+
+        var ports = incoming ? layout.Inputs : layout.Outputs;
+        var port = ports.FirstOrDefault(p => p.Part == connection.Part);
+        var anchor = port is not null
+            ? layout.PortAnchor(port)
+            : new PointF(incoming ? layout.Bounds.Left : layout.Bounds.Right, layout.Bounds.Center.Y);
+
+        var markerX = incoming
+            ? anchor.X - BoundaryMarkerGap - BoundaryMarkerSize
+            : anchor.X + BoundaryMarkerGap;
+        var markerRect = new RectF(markerX, anchor.Y - BoundaryMarkerSize / 2, BoundaryMarkerSize, BoundaryMarkerSize);
+        var markerAnchor = new PointF(incoming ? markerRect.Right : markerRect.Left, anchor.Y);
+
+        var start = incoming ? markerAnchor : anchor;
+        var end = incoming ? anchor : markerAnchor;
+
+        var flow = result.FlowOf(connection);
+        canvas.StrokeColor = state.Settings.WireColorByPart ? PartPalette.ColorFor(connection.Part) : Theme.Wire;
+        canvas.StrokeSize = 2f;
+        var mid = DrawWirePath(canvas, start, end);
+
+        // Marker chip with the part icon, then the flow label on the wire.
+        canvas.FillColor = Theme.PortChip;
+        canvas.FillRoundedRectangle(markerRect, 5f);
+        var icon = icons.GetImage(connection.Part);
+        if (icon is not null)
+            canvas.DrawImage(icon, markerRect.X + 1, markerRect.Y + 1, markerRect.Width - 2, markerRect.Height - 2);
+        if (flow > Rational.Zero)
+            DrawLabelPill(canvas, numbers.Connection(flow), mid.X, mid.Y, anchorRight: false);
+    }
+
+    /// <summary>Stroke the wire from <paramref name="start"/> to <paramref name="end"/> in the
+    /// document's path style (Direct / 2D / Curves) and return its mid-point for labelling.</summary>
+    private PointF DrawWirePath(ICanvas canvas, PointF start, PointF end)
+    {
         var path = new PathF();
         path.MoveTo(start);
         PointF mid;
@@ -76,18 +156,7 @@ public sealed partial class FactoryCanvasDrawable
             mid = BezierPoint(start, new PointF(start.X + dx, start.Y), new PointF(end.X - dx, end.Y), end, 0.5f);
         }
         canvas.DrawPath(path);
-
-        // Mid label: part icon + flow ppm — pill treatment (Slice B #3).
-        var icon = icons.GetImage(connection.Part);
-        const float iconSize = 16f;
-        if (icon is not null)
-            canvas.DrawImage(icon, mid.X - iconSize - 2, mid.Y - iconSize / 2, iconSize, iconSize);
-        // The label sits to the right of the icon, centred on mid.Y.
-        DrawLabelPill(canvas, numbers.Connection(flow), mid.X, mid.Y, anchorRight: false);
-
-        // Over-capacity warning: a small warning glyph (⚠) above the mid-point.
-        if (overflow is not null)
-            DrawOverCapacityWarning(canvas, mid, overflow);
+        return mid;
     }
 
     private void DrawOverCapacityWarning(ICanvas canvas, PointF mid, ConnectionOverflow overflow)

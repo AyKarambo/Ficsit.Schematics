@@ -38,19 +38,6 @@ public sealed partial class FactoryCanvasDrawable
             return;
         }
 
-        // Outpost boundary handle (pinned at the edge): the whole badge is the item port.
-        if (node.Kind is NodeKind.Import or NodeKind.Export)
-        {
-            canvas.FillColor = Theme.CardBackground;
-            canvas.FillRoundedRectangle(layout.Bounds, corner);
-            canvas.StrokeColor = selected ? Theme.SelectedBorder : Theme.CardBorder;
-            canvas.StrokeSize = selected ? 2f : 1f;
-            canvas.DrawRoundedRectangle(layout.Bounds, corner);
-            foreach (var port in layout.Inputs) DrawPort(canvas, layout, port, nodeResult);
-            foreach (var port in layout.Outputs) DrawPort(canvas, layout, port, nodeResult);
-            return;
-        }
-
         if (layout.MapCompact)
         {
             DrawMapCompact(canvas, layout, nodeResult, selected);

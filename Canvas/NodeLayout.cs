@@ -74,10 +74,10 @@ public sealed class NodeLayout
     public List<PortInfo> Inputs { get; } = [];
     public List<PortInfo> Outputs { get; } = [];
 
-    public static NodeLayout Compute(FactoryNode node, GameDatabase data, FactoryGraph scope, bool mapCompact = false, PointF? positionOverride = null)
+    public static NodeLayout Compute(FactoryNode node, GameDatabase data, FactoryGraph scope, bool mapCompact = false)
     {
-        var x = positionOverride?.X ?? (float)node.X;
-        var y = positionOverride?.Y ?? (float)node.Y;
+        var x = (float)node.X;
+        var y = (float)node.Y;
 
         // Map-snapped extractor: a marker-sized badge with one value chip and a
         // single output port. Editing still happens through the popup.
@@ -103,24 +103,6 @@ public sealed class NodeLayout
             PlacePorts(specialty.Inputs, OrderParts(inParts, node.InputOrder), box.Left, box.Top, box.Height, isInput: true);
             PlacePorts(specialty.Outputs, OrderParts(outParts, node.OutputOrder), box.Right - PortSize, box.Top, box.Height, isInput: false);
             return specialty;
-        }
-
-        // Outpost boundary handle: the whole badge IS its port (one item), so it can be grabbed
-        // anywhere to wire — and it is pinned to the canvas edge (positionOverride), not movable.
-        if (node.Kind is NodeKind.Import or NodeKind.Export)
-        {
-            var box = new RectF(x, y, SpecialtySize, SpecialtySize);
-            var handle = new NodeLayout
-            {
-                Node = node,
-                Bounds = box,
-                ImageRect = box.Inflate(-4, -4),
-                HasValueRow = false,
-                HasLimitRow = false,
-            };
-            var isImport = node.Kind == NodeKind.Import;
-            (isImport ? handle.Outputs : handle.Inputs).Add(new PortInfo(node.Name, box, !isImport));
-            return handle;
         }
 
         List<string> inputParts = [];
@@ -207,21 +189,14 @@ public sealed class NodeLayout
         return result;
     }
 
-    /// <summary>The outpost box's ports. Each Import handle inside is an input, each Export an
-    /// output — they are the explicit, canonical boundary, so a handle declared from inside (wired
-    /// only to interior machines) still shows on the box. Any direct connection that crosses the
-    /// boundary without a handle is surfaced too, defensively.</summary>
+    /// <summary>The outpost box's ports, auto-derived from the connections that cross its
+    /// boundary: a part entering it (a connection from outside to a member) is an input port,
+    /// a part leaving it (member to outside) an output port. There are no stored boundary
+    /// handles — membership and crossings are read straight off the flat graph.</summary>
     public static (List<string> InParts, List<string> OutParts) OutpostBoundaryParts(FactoryNode outpost, FactoryGraph graph)
     {
         var inParts = new List<string>();
         var outParts = new List<string>();
-
-        foreach (var n in graph.Nodes)
-        {
-            if (n.Parent != outpost) continue;
-            if (n.Kind == NodeKind.Import && !inParts.Contains(n.Name)) inParts.Add(n.Name);
-            else if (n.Kind == NodeKind.Export && !outParts.Contains(n.Name)) outParts.Add(n.Name);
-        }
 
         foreach (var c in graph.Connections)
         {
