@@ -14,4 +14,10 @@ public sealed class SaveWorld
     /// order (e.g. "PackagedWater", "Alternate_BoltedFrame"). Correlated to machines per type by
     /// <see cref="SaveImport"/>; catalog-free here so the reader stays catalog-free.</summary>
     public IReadOnlyList<string> RecipeStems { get; init; } = [];
+
+    /// <summary>Raw component → connected-component wiring (e.g.
+    /// <c>…Build_ConstructorMk1_C_1.Output0</c> → <c>…Build_ConveyorBeltMk2_C_2.ConveyorAny0</c>).
+    /// Traced into machine→machine edges by <see cref="SaveImport"/>.</summary>
+    public IReadOnlyDictionary<string, string> ComponentLinks { get; init; } =
+        new Dictionary<string, string>();
 }

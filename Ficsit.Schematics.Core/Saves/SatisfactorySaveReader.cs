@@ -338,6 +338,7 @@ public static class SatisfactorySaveReader
             Buildings = ReadBuildingsFromBody(body),
             ResourceNodes = ReadResourceNodesFromBody(body),
             RecipeStems = ScanRecipeStems(body),
+            ComponentLinks = ReadComponentLinksFromBody(body),
         };
     }
 

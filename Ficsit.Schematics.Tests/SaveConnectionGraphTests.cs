@@ -38,4 +38,25 @@ public class SaveConnectionGraphTests
         var backRefs = links.Values.Count(links.ContainsKey);
         Assert.True(backRefs > links.Count * 0.9, $"Expected mostly bidirectional links, got {backRefs}/{links.Count}.");
     }
+
+    [Fact]
+    public void Materializes_recipe_compatible_connections_from_a_real_save()
+    {
+        var save = NewestFactorySave();
+        if (save is null) return;
+
+        var world = SatisfactorySaveReader.ReadWorld(save);
+        var (nodes, connections) = SaveImport.Build(world, TestData.Database);
+
+        Assert.NotEmpty(nodes);
+        Assert.NotEmpty(connections);
+        // Every materialized connection must carry a part the producer makes and the consumer takes.
+        Assert.All(connections, c =>
+        {
+            Assert.NotEqual(c.From, c.To);
+            Assert.False(string.IsNullOrEmpty(c.Part));
+            Assert.Contains(c.From, nodes);
+            Assert.Contains(c.To, nodes);
+        });
+    }
 }

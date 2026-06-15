@@ -154,20 +154,30 @@ public sealed class FactoryEditor
     }
 
     /// <summary>
-    /// Add pre-built nodes (e.g. machines imported from a save) to the root graph in one
-    /// undoable step — a single re-solve. The nodes already carry their recipe/variant/clock/
-    /// position; their <see cref="FactoryNode.Parent"/> is honoured as-is (null = root).
+    /// Add pre-built nodes (e.g. machines imported from a save), and optionally connections
+    /// between them, to the root graph in one undoable step — a single re-solve. The nodes carry
+    /// their recipe/variant/clock/position; their <see cref="FactoryNode.Parent"/> is honoured
+    /// as-is (null = root).
     /// </summary>
-    public void AddNodes(IReadOnlyList<FactoryNode> nodes)
+    public void AddNodes(IReadOnlyList<FactoryNode> nodes, IReadOnlyList<NodeConnection>? connections = null)
     {
         if (nodes.Count == 0) return;
         var graph = Document.Root;
         var added = nodes.ToList();
+        var wires = connections?.ToList() ?? [];
         Commands.Push(new EditCommand
         {
             Label = added.Count == 1 ? $"Import {added[0].Name}" : $"Import {added.Count} machines",
-            Apply = () => { foreach (var node in added) if (!graph.Nodes.Contains(node)) graph.Nodes.Add(node); },
-            Revert = () => { foreach (var node in added) graph.RemoveNode(node); },
+            Apply = () =>
+            {
+                foreach (var node in added) if (!graph.Nodes.Contains(node)) graph.Nodes.Add(node);
+                foreach (var wire in wires) if (!graph.Connections.Contains(wire)) graph.Connections.Add(wire);
+            },
+            Revert = () =>
+            {
+                foreach (var wire in wires) graph.Connections.Remove(wire);
+                foreach (var node in added) graph.RemoveNode(node);
+            },
         });
     }
 

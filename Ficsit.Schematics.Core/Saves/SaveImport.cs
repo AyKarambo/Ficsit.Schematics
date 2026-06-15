@@ -43,6 +43,11 @@ public static class SaveImport
         ["Build_GeneratorGeoThermal_C"] = "Geothermal Generator",
     };
 
+    /// <summary>True when a build class is one we place as a node (a real producer/consumer),
+    /// as opposed to transport (belts, lifts, splitters/mergers, pipes). Used by the connection
+    /// tracer to know where a wire run terminates.</summary>
+    public static bool IsModelledMachine(string className) => ClassToMachine.ContainsKey(className);
+
     /// <summary>Machine families whose node sits on a map resource node (so it snaps + takes
     /// the node's recipe).</summary>
     private static readonly HashSet<string> SnapFamilies =
@@ -57,29 +62,41 @@ public static class SaveImport
     /// <summary>Build factory nodes for the parsed world. Extractors snap to their resource node;
     /// other machines take their real recipe from the save's <c>mCurrentRecipe</c> values.</summary>
     public static IReadOnlyList<FactoryNode> BuildNodes(SaveWorld world, GameDatabase data)
+        => PlaceBuildings(world, data).Nodes;
+
+    /// <summary>Full import: machines placed at their world positions plus the connections recovered
+    /// from the save's belt/pipe graph (recipe-compatible producer→consumer edges).</summary>
+    public static (IReadOnlyList<FactoryNode> Nodes, IReadOnlyList<NodeConnection> Connections) Build(
+        SaveWorld world, GameDatabase data)
+    {
+        var (nodes, byInstance) = PlaceBuildings(world, data);
+        return (nodes, BuildConnections(world, data, byInstance));
+    }
+
+    private static (List<FactoryNode> Nodes, Dictionary<string, FactoryNode> ByInstance) PlaceBuildings(
+        SaveWorld world, GameDatabase data)
     {
         var nodes = new List<FactoryNode>();
+        var byInstance = new Dictionary<string, FactoryNode>(StringComparer.Ordinal);
         var usedNodes = new HashSet<string>();
         var recipeQueues = BuildRecipeQueues(world, data);
 
         foreach (var building in world.Buildings)
         {
             if (!ClassToMachine.TryGetValue(building.ClassName, out var machine)) continue;
+            FactoryNode? node = null;
 
             // An extractor's recipe is the ore of the node it sits on, so without a free matching
             // node we can't say what it mines — snap it or drop it (rather than guess an ore).
             if (SnapFamilies.Contains(machine))
             {
-                if (TrySnapExtractor(building, machine, world, data, usedNodes) is { } extractor)
-                    nodes.Add(extractor);
-                continue;
+                node = TrySnapExtractor(building, machine, world, data, usedNodes);
             }
-
-            // A generator is one machine that burns any fuel; place it as the unified node — its
-            // fuel comes from the connection (added later), not a guessed recipe.
-            if (data.GeneratorMachines.Contains(machine))
+            else if (data.GeneratorMachines.Contains(machine))
             {
-                nodes.Add(new FactoryNode
+                // A generator is one machine that burns any fuel; place the unified node — its fuel
+                // comes from the connection, not a guessed recipe.
+                node = new FactoryNode
                 {
                     Name = machine,
                     Kind = NodeKind.Generator,
@@ -88,31 +105,68 @@ public static class SaveImport
                     ClockSpeed = building.ClockSpeed,
                     Somersloops = building.Somersloops,
                     Max = "1", // one physical generator
-                });
-                continue;
+                };
+            }
+            else
+            {
+                // Take the next real recipe for this machine type (the k-th machine of a type gets
+                // the k-th mCurrentRecipe of that type), else a best-effort first recipe.
+                var recipe = recipeQueues.TryGetValue(machine, out var queue) && queue.Count > 0
+                    ? queue.Dequeue()
+                    : FirstRecipe(data, machine);
+                if (recipe is not null)
+                    node = new FactoryNode
+                    {
+                        Name = recipe,
+                        Kind = NodeKind.Recipe,
+                        X = building.X / CmPerUnit,
+                        Y = building.Y / CmPerUnit,
+                        ClockSpeed = building.ClockSpeed,
+                        Somersloops = building.Somersloops,
+                        Max = "1", // one physical machine (count display)
+                    };
             }
 
-            // Other machine: take the next real recipe for this machine type (the k-th machine of a
-            // type gets the k-th mCurrentRecipe of that type), else a best-effort first recipe.
-            var recipe = recipeQueues.TryGetValue(machine, out var queue) && queue.Count > 0
-                ? queue.Dequeue()
-                : FirstRecipe(data, machine);
-            if (recipe is null) continue; // machine we don't model a recipe for (skip silently)
-
-            nodes.Add(new FactoryNode
-            {
-                Name = recipe,
-                Kind = NodeKind.Recipe,
-                X = building.X / CmPerUnit,
-                Y = building.Y / CmPerUnit,
-                ClockSpeed = building.ClockSpeed,
-                Somersloops = building.Somersloops,
-                Max = "1", // one physical machine (count display)
-            });
+            if (node is null) continue;
+            nodes.Add(node);
+            byInstance[building.Instance] = node;
         }
 
-        return nodes;
+        return (nodes, byInstance);
     }
+
+    /// <summary>Materialize the traced machine→machine edges as recipe-compatible connections: an
+    /// edge becomes a connection only when the producer makes a part the consumer takes.</summary>
+    private static List<NodeConnection> BuildConnections(
+        SaveWorld world, GameDatabase data, Dictionary<string, FactoryNode> byInstance)
+    {
+        var connections = new List<NodeConnection>();
+        var seen = new HashSet<(int, int, string)>();
+        foreach (var (fromInstance, toInstance) in
+                 SaveConnectionTracer.MachineEdges(world.ComponentLinks, IsModelledMachine))
+        {
+            if (!byInstance.TryGetValue(fromInstance, out var from)
+                || !byInstance.TryGetValue(toInstance, out var to) || from == to) continue;
+            var part = OutputParts(from, data).FirstOrDefault(InputParts(to, data).Contains);
+            if (part is null) continue;
+            if (seen.Add((from.Id, to.Id, part)))
+                connections.Add(new NodeConnection { From = from, To = to, Part = part });
+        }
+        return connections;
+    }
+
+    /// <summary>Parts a node can put out: its recipe's outputs (or, for a generator, its machine's
+    /// outputs, e.g. nuclear waste).</summary>
+    private static IEnumerable<string> OutputParts(FactoryNode node, GameDatabase data)
+        => node.Kind == NodeKind.Generator
+            ? data.Document.Recipes.Where(r => r.Machine == node.Name).SelectMany(r => r.Outputs).Select(p => p.Part)
+            : data.RecipesByName.TryGetValue(node.Name, out var r) ? r.Outputs.Select(p => p.Part) : [];
+
+    /// <summary>Parts a node takes in: its recipe's inputs (or, for a generator, any of its fuels).</summary>
+    private static IEnumerable<string> InputParts(FactoryNode node, GameDatabase data)
+        => node.Kind == NodeKind.Generator
+            ? data.Document.Recipes.Where(r => r.Machine == node.Name).SelectMany(r => r.Inputs).Select(p => p.Part)
+            : data.RecipesByName.TryGetValue(node.Name, out var r) ? r.Inputs.Select(p => p.Part) : [];
 
     /// <summary>Resolve the save's recipe stems to catalog recipes and group them by machine, in
     /// order. Same serialization order as the building headers, so dequeuing per machine lines the
