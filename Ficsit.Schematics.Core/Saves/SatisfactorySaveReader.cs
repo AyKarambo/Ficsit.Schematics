@@ -157,9 +157,80 @@ public static class SatisfactorySaveReader
     }
 
     public static IReadOnlyList<ResourceNodeInfo> ReadResourceNodes(byte[] saveFile)
+        => ReadResourceNodesFromBody(DecompressBody(saveFile));
+
+    // -------------------------------------------------------- built world
+
+    /// <summary>
+    /// Read the built world (Phase 0 of "import built factories"): every <c>Build_*</c> machine
+    /// actor with its class and world transform, plus the resource nodes (so extractors can snap
+    /// to the node they sit on). The body is inflated once and scanned for both.
+    /// </summary>
+    public static SaveWorld ReadWorld(string filePath) => ReadWorld(File.ReadAllBytes(filePath));
+
+    public static SaveWorld ReadWorld(byte[] saveFile)
     {
         var body = DecompressBody(saveFile);
+        return new SaveWorld
+        {
+            Buildings = ReadBuildingsFromBody(body),
+            ResourceNodes = ReadResourceNodesFromBody(body),
+        };
+    }
 
+    public static IReadOnlyList<SaveBuilding> ReadBuildings(string filePath)
+        => ReadBuildingsFromBody(DecompressBody(File.ReadAllBytes(filePath)));
+
+    /// <summary>
+    /// Every machine actor in the inflated body. Detects an actor header whose class is a
+    /// <c>Build_*_C</c> path generically — same header framing the resource-node scan is verified
+    /// against (entry type 1, length-prefixed null-terminated class FString, then level / instance
+    /// / quaternion / position) — so it needs no per-machine class table. Public for unit testing
+    /// against a synthetic body. Recipe/clock/shard enrichment is deferred (see SaveBuilding).
+    /// </summary>
+    public static IReadOnlyList<SaveBuilding> ReadBuildingsFromBody(byte[] body)
+    {
+        var buildings = new List<SaveBuilding>();
+        var seenStarts = new HashSet<int>();
+        var marker = Encoding.ASCII.GetBytes("Build_");
+        foreach (var at in FindAll(body, marker))
+        {
+            // Walk back to the class FString start ("/Game/...Build_X.Build_X_C").
+            var start = at;
+            while (start > 0 && IsPathByte(body[start - 1])) start--;
+            if (start < 8 || !seenStarts.Add(start)) continue;
+
+            var end = start;
+            while (end < body.Length && IsPathByte(body[end])) end++;
+            if (end >= body.Length || body[end] != 0) continue;             // FString is null-terminated
+            var pathLen = end - start;
+            if (BitConverter.ToInt32(body, start - 4) != pathLen + 1) continue; // FString length prefix
+            if (BitConverter.ToInt32(body, start - 8) != 1) continue;       // actor entry (type 1)
+
+            var path = Encoding.ASCII.GetString(body, start, pathLen);
+            var dot = path.LastIndexOf('.');
+            var shortClass = dot >= 0 ? path[(dot + 1)..] : path;
+            if (!shortClass.StartsWith("Build_", StringComparison.Ordinal)
+                || !shortClass.EndsWith("_C", StringComparison.Ordinal)) continue;
+
+            var p = start + pathLen + 1;
+            if (!TryReadFString(body, ref p, out _)) continue;              // level
+            if (!TryReadFString(body, ref p, out var instance)) continue;
+            p += 8;                                                          // unknown int32 pair
+            p += 16;                                                         // quaternion (rotation)
+            if (p + 12 > body.Length) continue;
+            var x = BitConverter.ToSingle(body, p);
+            var y = BitConverter.ToSingle(body, p + 4);
+            var z = BitConverter.ToSingle(body, p + 8);
+            if (double.IsNaN(x) || Math.Abs(x) > 1e7 || Math.Abs(y) > 1e7 || Math.Abs(z) > 1e6) continue;
+
+            buildings.Add(new SaveBuilding { ClassName = shortClass, Instance = instance, X = x, Y = y, Z = z });
+        }
+        return buildings;
+    }
+
+    private static IReadOnlyList<ResourceNodeInfo> ReadResourceNodesFromBody(byte[] body)
+    {
         var headers = new List<ActorHeader>();
         headers.AddRange(ScanActorHeaders(body, NodeClass, ResourceNodeKind.Node));
         headers.AddRange(ScanActorHeaders(body, GeyserClass, ResourceNodeKind.Geyser));

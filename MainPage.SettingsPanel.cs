@@ -127,8 +127,9 @@ public partial class MainPage
     }
 
     /// <summary>
-    /// Reads resource nodes (ore nodes, geysers, resource wells) out of a
-    /// Satisfactory save and shows them on the world map for snapping.
+    /// Reads a Satisfactory save: its resource nodes (shown on the world map for snapping) and,
+    /// optionally, its built machines — placed on the map at their real locations, miners snapped
+    /// to their nodes (the "import built factories" feature, Phase 1).
     /// </summary>
     private async void OnImportSaveClicked(object? sender, EventArgs e)
     {
@@ -145,8 +146,8 @@ public partial class MainPage
             });
             if (picked is null) return;
 
-            var nodes = await Task.Run(() => SatisfactorySaveReader.ReadResourceNodes(picked.FullPath));
-            _state.ImportMapNodes(nodes);
+            var world = await Task.Run(() => SatisfactorySaveReader.ReadWorld(picked.FullPath));
+            _state.ImportMapNodes(world.ResourceNodes);
             _state.Settings.ShowMap = true;
             _state.SaveSettings();
             UpdateMapButton();
@@ -155,8 +156,28 @@ public partial class MainPage
             // Loading a save also imports its unlocked alternate recipes (so the planner
             // matches what the player has actually unlocked).
             var recipeSummary = await ApplyUnlockedRecipesFromSaveAsync(picked.FullPath);
+
+            // Offer to place the save's built machines onto the map (one undoable step).
+            var factories = SaveImport.BuildNodes(world, _state.Data);
+            var placed = 0;
+            if (factories.Count > 0
+                && await DisplayAlertAsync("Import built factories",
+                    $"This save has {factories.Count} machine(s) we can place on the map "
+                    + "at their real locations (miners snapped to their nodes). "
+                    + "Add them to the current factory?\n\n"
+                    + "Extractors keep their real recipe; other machines get a best-effort recipe "
+                    + "you can adjust. Connections aren't imported yet.",
+                    "Place machines", "Skip"))
+            {
+                _state.Editor.AddNodes(factories);
+                placed = factories.Count;
+                _drawable.InvalidateLayouts();
+                Canvas.Invalidate();
+            }
+
+            var placedLine = placed > 0 ? $"\nPlaced {placed} machine(s)." : "";
             await DisplayAlertAsync("Import save",
-                $"Imported {nodes.Count} resource node(s).\n{recipeSummary}", "OK");
+                $"Imported {world.ResourceNodes.Count} resource node(s).{placedLine}\n{recipeSummary}", "OK");
         }
         catch (Exception ex)
         {

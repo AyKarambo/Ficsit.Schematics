@@ -153,6 +153,24 @@ public sealed class FactoryEditor
         return node;
     }
 
+    /// <summary>
+    /// Add pre-built nodes (e.g. machines imported from a save) to the root graph in one
+    /// undoable step — a single re-solve. The nodes already carry their recipe/variant/clock/
+    /// position; their <see cref="FactoryNode.Parent"/> is honoured as-is (null = root).
+    /// </summary>
+    public void AddNodes(IReadOnlyList<FactoryNode> nodes)
+    {
+        if (nodes.Count == 0) return;
+        var graph = Document.Root;
+        var added = nodes.ToList();
+        Commands.Push(new EditCommand
+        {
+            Label = added.Count == 1 ? $"Import {added[0].Name}" : $"Import {added.Count} machines",
+            Apply = () => { foreach (var node in added) if (!graph.Nodes.Contains(node)) graph.Nodes.Add(node); },
+            Revert = () => { foreach (var node in added) graph.RemoveNode(node); },
+        });
+    }
+
     public void DeleteNodes(IReadOnlyList<FactoryNode> nodes)
     {
         if (nodes.Count == 0) return;
