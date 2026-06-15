@@ -49,6 +49,12 @@ public sealed partial class CanvasController
             if (family is not null && family.Capacities.Any(c => c.Name == best.Purity))
                 state.Editor.SetProperty(node, "Purity", n => n.Capacity, (n, v) => n.Capacity = v, (string?)best.Purity);
         }
+
+        // A snapped extractor is one physical machine whose output is driven by mark × purity ×
+        // clock, so the auto-applied ppm default limit is meaningless — drop it so the editor
+        // doesn't show a cap the solver ignores (issue #7). No-op once already cleared.
+        if (node.HasLimit)
+            state.Editor.SetProperty(node, "Clear limit", n => n.Max, (n, v) => n.Max = v, (string?)null);
         drawable.InvalidateLayouts();
         return best;
     }

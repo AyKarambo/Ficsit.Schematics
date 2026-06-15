@@ -177,6 +177,13 @@ internal sealed class NodeProfile
         if (node.LimitValue is { } limit)
             profile.LimitCount = profile.IsPpmDisplay && !profile.PpmUnit.IsZero ? limit / profile.PpmUnit : limit;
 
+        // A map-snapped extractor models exactly one physical machine fixed to its resource
+        // node: its output is mark × purity × clock at full rate. Pin it to a single machine so
+        // the ppm scales with the overclock (issue #7) — the auto-applied ppm default Max would
+        // otherwise cap output at the 100% value and silently cancel any overclock or purity.
+        if (node.ResourceNodeId is not null)
+            profile.LimitCount = Rational.One;
+
         if (machine is not null)
         {
             profile._machine = machine;

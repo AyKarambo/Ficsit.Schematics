@@ -57,6 +57,39 @@ public class SolverTests
     }
 
     [Fact]
+    public void Snapped_extractor_scales_output_with_overclock()
+    {
+        // A miner placed on a map resource node is one physical machine: overclocking it must
+        // scale the parts-per-minute (issue #7). The auto-applied ppm default Max ("60") must
+        // not cap output at the 100% value.
+        var doc = new FactoryDocument();
+        var miner = Node(doc, "Iron Ore", "60");
+        miner.ResourceNodeId = "/Game/.../BP_ResourceNode_42"; // marks it snapped to a node
+        miner.ClockSpeed = new Rational(3, 2);                  // 150%
+
+        var result = Solve(doc);
+        // Mk.1 miner on a Normal node at 150% → 90/min, one machine.
+        Assert.Equal(new Rational(90), result.For(miner).DisplayValue);
+        Assert.Equal(Rational.One, result.For(miner).Count);
+        Assert.True(result.For(miner).IsPpmDisplay);
+    }
+
+    [Fact]
+    public void Snapped_extractor_shows_full_output_for_node_purity()
+    {
+        // Snapping adopts the node purity (×2 for Pure); the displayed rate must reflect it,
+        // not the default ppm Max (issue #7).
+        var doc = new FactoryDocument();
+        var miner = Node(doc, "Iron Ore", "60");
+        miner.ResourceNodeId = "/Game/.../BP_ResourceNode_7";
+        miner.Capacity = "Pure";
+
+        var result = Solve(doc);
+        Assert.Equal(new Rational(120), result.For(miner).DisplayValue);
+        Assert.Equal(Rational.One, result.For(miner).Count);
+    }
+
+    [Fact]
     public void No_limits_anywhere_solves_to_zero()
     {
         var doc = new FactoryDocument();
