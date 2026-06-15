@@ -84,6 +84,41 @@ public class SaveImportTests
     }
 
     [Fact]
+    public void Production_recipes_correlate_to_machines_in_order()
+    {
+        // The k-th machine of a type takes the k-th mCurrentRecipe of that type — so a Packager
+        // that packages Water shows Water, not the placeholder first recipe (issue #8 follow-up).
+        var world = new SaveWorld
+        {
+            Buildings =
+            [
+                new SaveBuilding { ClassName = "Build_Packager_C", X = 0, Y = 0 },
+                new SaveBuilding { ClassName = "Build_Packager_C", X = 100, Y = 0 },
+            ],
+            RecipeStems = ["PackagedWater", "PackagedFuel"],
+        };
+
+        var nodes = SaveImport.BuildNodes(world, TestData.Database);
+        Assert.Equal(2, nodes.Count);
+        Assert.Equal("Packaged Water", nodes[0].Name);
+        Assert.Equal("Packaged Fuel", nodes[1].Name);
+    }
+
+    [Fact]
+    public void Recipe_stems_only_feed_their_own_machine_type()
+    {
+        // A Constructor recipe in the save must not be consumed by a Packager (per-type queues).
+        var world = new SaveWorld
+        {
+            Buildings = [new SaveBuilding { ClassName = "Build_Packager_C", X = 0, Y = 0 }],
+            RecipeStems = ["IronPlate", "PackagedWater"],
+        };
+
+        var node = Assert.Single(SaveImport.BuildNodes(world, TestData.Database));
+        Assert.Equal("Packaged Water", node.Name); // the Iron Plate (Constructor) stem is ignored here
+    }
+
+    [Fact]
     public void Unmodelled_classes_are_skipped()
     {
         var world = new SaveWorld

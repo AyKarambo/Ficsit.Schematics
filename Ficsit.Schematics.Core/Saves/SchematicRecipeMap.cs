@@ -142,8 +142,9 @@ public static class SchematicRecipeMap
     }
 
     /// <summary>Sorted, lowercased word tokens (split on non-alphanumerics, camelCase, and
-    /// letter↔digit boundaries) joined into a canonical key — order-insensitive.</summary>
-    private static string TokenKey(string text)
+    /// letter↔digit boundaries) joined into a canonical key — order-insensitive. Public so the
+    /// save-import recipe matcher can share the exact tokenisation.</summary>
+    public static string TokenKey(string text)
     {
         var tokens = new List<string>();
         var sb = new StringBuilder();

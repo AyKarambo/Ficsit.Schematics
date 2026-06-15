@@ -21,12 +21,8 @@ public sealed class SaveBuilding
     public double Y { get; set; }
     public double Z { get; set; }
 
-    /// <summary>The recipe-class stem from <c>mCurrentRecipe</c> when read (e.g. "IronPlate",
-    /// "Alternate_BoltedFrame"); null when the save carries none (extractors, idle machines).
-    /// Resolved to a catalog recipe name in <see cref="SaveImport"/>.</summary>
-    public string? RecipeStem { get; set; }
-
-    /// <summary>Clock as a fraction (1 = 100%) from <c>mCurrentPotential</c>; defaults to 100%.</summary>
+    /// <summary>Clock as a fraction (1 = 100%) from <c>mCurrentPotential</c>; defaults to 100%
+    /// (per-building clock parsing is not wired yet, so this stays at 100% on import).</summary>
     public Rational ClockSpeed { get; set; } = Rational.One;
 
     /// <summary>Production shards (Somersloops) installed.</summary>

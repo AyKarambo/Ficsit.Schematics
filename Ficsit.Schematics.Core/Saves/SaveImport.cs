@@ -54,11 +54,13 @@ public static class SaveImport
     /// <summary>How close (cm) a machine must be to a resource node to be treated as sitting on it.</summary>
     private const double SnapRadiusCm = 5_000; // 50 m — each node holds at most one extractor
 
-    /// <summary>Build factory nodes for the parsed world. Extractors snap to their resource node.</summary>
+    /// <summary>Build factory nodes for the parsed world. Extractors snap to their resource node;
+    /// other machines take their real recipe from the save's <c>mCurrentRecipe</c> values.</summary>
     public static IReadOnlyList<FactoryNode> BuildNodes(SaveWorld world, GameDatabase data)
     {
         var nodes = new List<FactoryNode>();
         var usedNodes = new HashSet<string>();
+        var recipeQueues = BuildRecipeQueues(world, data);
 
         foreach (var building in world.Buildings)
         {
@@ -73,9 +75,11 @@ public static class SaveImport
                 continue;
             }
 
-            // Other machine: place at its world position with its recipe, as one physical machine.
-            // RecipeStem is honoured when the save carried one.
-            var recipe = ResolveRecipe(data, building.RecipeStem, machine);
+            // Other machine: take the next real recipe for this machine type (the k-th machine of a
+            // type gets the k-th mCurrentRecipe of that type), else a best-effort first recipe.
+            var recipe = recipeQueues.TryGetValue(machine, out var queue) && queue.Count > 0
+                ? queue.Dequeue()
+                : FirstRecipe(data, machine);
             if (recipe is null) continue; // machine we don't model a recipe for (skip silently)
 
             nodes.Add(new FactoryNode
@@ -91,6 +95,32 @@ public static class SaveImport
         }
 
         return nodes;
+    }
+
+    /// <summary>Resolve the save's recipe stems to catalog recipes and group them by machine, in
+    /// order. Same serialization order as the building headers, so dequeuing per machine lines the
+    /// k-th machine of a type up with the k-th recipe of that type.</summary>
+    private static Dictionary<string, Queue<string>> BuildRecipeQueues(SaveWorld world, GameDatabase data)
+    {
+        // Token-set index over every recipe name (e.g. "packaged|water"), unique matches only.
+        var byToken = new Dictionary<string, string?>();
+        foreach (var recipe in data.Document.Recipes)
+        {
+            var key = SchematicRecipeMap.TokenKey(recipe.Name);
+            byToken[key] = byToken.ContainsKey(key) ? null : recipe.Name;
+        }
+
+        var queues = new Dictionary<string, Queue<string>>();
+        foreach (var stem in world.RecipeStems)
+        {
+            var bare = stem.StartsWith("Alternate_", StringComparison.Ordinal)
+                ? stem["Alternate_".Length..] : stem;
+            if (byToken.GetValueOrDefault(SchematicRecipeMap.TokenKey(bare)) is not { } name) continue;
+            if (!data.RecipesByName.TryGetValue(name, out var def)) continue;
+            if (!queues.TryGetValue(def.Machine, out var queue)) queues[def.Machine] = queue = new();
+            queue.Enqueue(name);
+        }
+        return queues;
     }
 
     private static FactoryNode? TrySnapExtractor(
@@ -136,18 +166,11 @@ public static class SaveImport
     private static string? RecipeForNode(GameDatabase data, string machine, ResourceNodeInfo rn)
         => data.Document.Recipes.FirstOrDefault(r => r.Machine == machine && MapSnap.Matches(data, r, rn))?.Name;
 
-    /// <summary>Resolve a recipe to place: the save's recipe stem when present, else the machine's
-    /// first standard recipe as a starting point. Null when we model no recipe for the machine.</summary>
-    private static string? ResolveRecipe(GameDatabase data, string? recipeStem, string machine)
-    {
-        if (recipeStem is not null
-            && data.Document.Recipes.FirstOrDefault(r => r.Machine == machine
-                && string.Equals(StemOf(r.Name), recipeStem, StringComparison.OrdinalIgnoreCase)) is { } matched)
-            return matched.Name;
-
-        return data.Document.Recipes.FirstOrDefault(r => r.Machine == machine && !r.Alternate)?.Name
+    /// <summary>The machine's first standard recipe, as a best-effort placeholder when the save
+    /// carried no recipe for it. Null when we model no recipe for the machine.</summary>
+    private static string? FirstRecipe(GameDatabase data, string machine)
+        => data.Document.Recipes.FirstOrDefault(r => r.Machine == machine && !r.Alternate)?.Name
             ?? data.Document.Recipes.FirstOrDefault(r => r.Machine == machine)?.Name;
-    }
 
     /// <summary>The selected mark variant for a multi-mark family from the class (e.g.
     /// "Build_MinerMk2_C" → "Miner Mk.2"); null for single-machine families.</summary>
@@ -160,8 +183,4 @@ public static class SaveImport
         var name = $"{family.Name} Mk.{digits}";
         return family.Machines.Any(v => v.Name == name) ? name : null;
     }
-
-    /// <summary>A recipe name reduced to a comparable stem (spaces/punctuation stripped).</summary>
-    private static string StemOf(string name)
-        => new(name.Where(char.IsLetterOrDigit).ToArray());
 }

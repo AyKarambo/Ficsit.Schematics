@@ -175,7 +175,46 @@ public static class SatisfactorySaveReader
         {
             Buildings = ReadBuildingsFromBody(body),
             ResourceNodes = ReadResourceNodesFromBody(body),
+            RecipeStems = ScanRecipeStems(body),
         };
+    }
+
+    /// <summary>
+    /// Every <c>mCurrentRecipe</c> value in the inflated body, as a recipe-class stem
+    /// ("PackagedWater", "Alternate_BoltedFrame"), in serialization order — which mirrors the
+    /// actor-header order, so <see cref="SaveImport"/> can line up the k-th machine of a type with
+    /// the k-th recipe of that type. Same property-name framing the resource-override scan uses.
+    /// Public for unit testing against a synthetic body.
+    /// </summary>
+    public static IReadOnlyList<string> ScanRecipeStems(byte[] body)
+    {
+        var name = Encoding.ASCII.GetBytes("mCurrentRecipe");
+        var stems = new List<string>();
+        foreach (var at in FindAll(body, name))
+        {
+            if (at < 4) continue;
+            if (BitConverter.ToInt32(body, at - 4) != name.Length + 1) continue; // FString length prefix
+            if (at + name.Length >= body.Length || body[at + name.Length] != 0) continue; // exact name
+            if (RecipeStemAfter(body, at + name.Length, 320) is { } stem) stems.Add(stem);
+        }
+        return stems;
+    }
+
+    /// <summary>The recipe stem from the first <c>Recipe_*</c> asset path within a window: the text
+    /// after "Recipe_" up to the next '.' (so "…/Recipe_PackagedWater.Recipe_PackagedWater_C" →
+    /// "PackagedWater").</summary>
+    private static string? RecipeStemAfter(byte[] body, int from, int window)
+    {
+        const string token = "Recipe_";
+        var text = Encoding.ASCII.GetString(body, from, Math.Min(window, body.Length - from));
+        var start = text.IndexOf(token, StringComparison.Ordinal);
+        if (start < 0) return null;
+        start += token.Length;
+        var end = start;
+        while (end < text.Length && (char.IsLetterOrDigit(text[end]) || text[end] == '_')) end++;
+        var stem = text[start..end];
+        if (stem.EndsWith("_C", StringComparison.Ordinal)) stem = stem[..^2];
+        return stem.Length > 0 ? stem : null;
     }
 
     public static IReadOnlyList<SaveBuilding> ReadBuildings(string filePath)

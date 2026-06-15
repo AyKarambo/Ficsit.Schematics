@@ -55,6 +55,43 @@ public class SaveReaderTests
     }
 
     [Fact]
+    public void Recipe_stem_scan_reads_mCurrentRecipe_values_in_order()
+    {
+        var body = ConcatBytes(
+            RecipeProperty("/Game/FactoryGame/Recipes/.../Recipe_PackagedWater.Recipe_PackagedWater_C"),
+            RecipeProperty("/Game/FactoryGame/Recipes/.../Recipe_Alternate_BoltedFrame.Recipe_Alternate_BoltedFrame_C"));
+
+        var stems = SatisfactorySaveReader.ScanRecipeStems(body);
+
+        Assert.Equal(new[] { "PackagedWater", "Alternate_BoltedFrame" }, stems);
+    }
+
+    /// <summary>An mCurrentRecipe ObjectProperty as the scanner frames it: the length-prefixed,
+    /// null-terminated property name, then (further along) the recipe asset path.</summary>
+    private static byte[] RecipeProperty(string recipePath)
+    {
+        using var ms = new MemoryStream();
+        using var w = new BinaryWriter(ms, Encoding.ASCII);
+        var name = Encoding.ASCII.GetBytes("mCurrentRecipe");
+        w.Write(name.Length + 1); // FString length prefix (read at name start - 4)
+        w.Write(name);
+        w.Write((byte)0);         // null terminator
+        w.Write(new byte[24]);    // property type/size/index padding before the value
+        var path = Encoding.ASCII.GetBytes(recipePath);
+        w.Write(path.Length + 1);
+        w.Write(path);
+        w.Write((byte)0);
+        return ms.ToArray();
+    }
+
+    private static byte[] ConcatBytes(params byte[][] parts)
+    {
+        using var ms = new MemoryStream();
+        foreach (var p in parts) ms.Write(p, 0, p.Length);
+        return ms.ToArray();
+    }
+
+    [Fact]
     public void Reads_built_world_from_a_real_save()
     {
         var save = NewestLocalSave();
