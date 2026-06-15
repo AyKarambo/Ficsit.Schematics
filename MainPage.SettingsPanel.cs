@@ -157,25 +157,31 @@ public partial class MainPage
             // matches what the player has actually unlocked).
             var recipeSummary = await ApplyUnlockedRecipesFromSaveAsync(picked.FullPath);
 
-            // Offer to place the save's built machines onto the map (one undoable step).
+            // Offer to place the save's built machines onto the map (one undoable step),
+            // grouped into outposts by location so a big factory isn't one flat sea of machines.
             var factories = SaveImport.BuildNodes(world, _state.Data);
             var placed = 0;
+            var outpostCount = 0;
             if (factories.Count > 0
                 && await DisplayAlertAsync("Import built factories",
                     $"This save has {factories.Count} machine(s) we can place on the map "
-                    + "at their real locations (miners snapped to their nodes). "
-                    + "Add them to the current factory?\n\n"
-                    + "Extractors keep their real recipe; other machines get a best-effort recipe "
-                    + "you can adjust. Connections aren't imported yet.",
+                    + "at their real locations (miners snapped to their nodes), grouped into "
+                    + "outposts by location. Add them to the current factory?\n\n"
+                    + "Extractors keep their real recipe; other machines get their saved recipe "
+                    + "where known. Connections aren't imported yet.",
                     "Place machines", "Skip"))
             {
-                _state.Editor.AddNodes(factories);
+                var outposts = SaveClustering.GroupByLocation(factories, _state.Data, SaveClustering.DefaultRadius);
+                _state.Editor.AddNodes([.. factories, .. outposts]);
                 placed = factories.Count;
+                outpostCount = outposts.Count;
                 _drawable.InvalidateLayouts();
                 Canvas.Invalidate();
             }
 
-            var placedLine = placed > 0 ? $"\nPlaced {placed} machine(s)." : "";
+            var placedLine = placed > 0
+                ? $"\nPlaced {placed} machine(s) in {outpostCount} outpost(s)."
+                : "";
             await DisplayAlertAsync("Import save",
                 $"Imported {world.ResourceNodes.Count} resource node(s).{placedLine}\n{recipeSummary}", "OK");
         }
