@@ -45,6 +45,168 @@ public static class SatisfactorySaveReader
     public static IReadOnlyList<ResourceNodeInfo> ReadResourceNodes(string filePath)
         => ReadResourceNodes(File.ReadAllBytes(filePath));
 
+    // ------------------------------------------------- connection graph
+
+    /// <summary>
+    /// Component → connected component links, read from the persistent level's object data
+    /// (every <c>mConnectedComponent</c> attributed to its owner). Keys/values are component
+    /// instance paths like <c>Persistent_Level:PersistentLevel.Build_X_123.Output0</c>.
+    /// Public so the connection-graph parse can be validated against a real save.
+    /// </summary>
+    public static IReadOnlyDictionary<string, string> ReadComponentLinks(byte[] saveFile)
+        => ReadComponentLinksFromBody(DecompressBody(saveFile));
+
+    private static readonly byte[] ConnMarker = Encoding.ASCII.GetBytes("mConnectedComponent");
+
+    internal static Dictionary<string, string> ReadComponentLinksFromBody(byte[] body)
+    {
+        var links = new Dictionary<string, string>(StringComparer.Ordinal);
+        if (FindPersistentLevelBlobs(body) is not { } blobs) return links;
+
+        var instances = WalkTocInstances(body, blobs.TocStart);
+        WalkDataLinks(body, blobs.DataStart, instances, links);
+        return links;
+    }
+
+    /// <summary>
+    /// Locate the persistent level's TOC and Data blob contents. Both are int64-length-prefixed
+    /// (so the high dword of a real, sub-4 GB length is 0 — binary noise rarely is) and both begin
+    /// with the same large <c>int32 numObjects</c>; that match, plus building instances in the TOC,
+    /// pins the pair down without parsing the version-sensitive grid/streaming-level preamble. The
+    /// persistent level has the most objects, so the highest-count match wins.
+    /// </summary>
+    private static (int TocStart, long TocLen, int DataStart, long DataLen)? FindPersistentLevelBlobs(byte[] body)
+    {
+        var marker = Encoding.ASCII.GetBytes("PersistentLevel.Build_");
+        (int, long, int, long)? best = null;
+        var bestCount = 0;
+        for (var p = 0; p + 16 < body.Length; p++)
+        {
+            if (BitConverter.ToInt32(body, p + 4) != 0) continue;           // TOC length high dword
+            var tocLen = BitConverter.ToInt64(body, p);
+            if (tocLen < 100_000 || p + 8 + tocLen + 12 > body.Length) continue;
+            var n1 = BitConverter.ToInt32(body, p + 8);
+            if (n1 is < 1000 or > 2_000_000) continue;                      // many objects (filters noise)
+            var dataPos = p + 8 + (int)tocLen;
+            if (BitConverter.ToInt32(body, dataPos + 4) != 0) continue;     // Data length high dword
+            var dataLen = BitConverter.ToInt64(body, dataPos);
+            if (dataLen < 4 || dataPos + 8 + dataLen > body.Length) continue;
+            if (BitConverter.ToInt32(body, dataPos + 8) != n1) continue;    // TOC/Data numObjects match
+            if (n1 > bestCount && IndexOf(body, marker, p + 8, p + 8 + (int)tocLen) >= 0)
+            {
+                best = (p + 8, tocLen, dataPos + 8, dataLen);
+                bestCount = n1;
+            }
+        }
+        return best;
+    }
+
+    /// <summary>Walk the TOC blob's object headers in order, returning each object's instance path.
+    /// Actor and (non-actor) object headers differ after the path; both start with int32 isActor.</summary>
+    private static List<string> WalkTocInstances(byte[] body, int tocStart)
+    {
+        var pos = tocStart;
+        var count = BitConverter.ToInt32(body, pos); pos += 4;
+        var instances = new List<string>(Math.Min(count, 1_000_000));
+        for (var i = 0; i < count; i++)
+        {
+            if (pos + 4 > body.Length) break;
+            var isActor = BitConverter.ToInt32(body, pos); pos += 4;
+            if (!ReadFString(body, ref pos, out _)) break;            // className
+            if (!ReadFString(body, ref pos, out _)) break;            // levelName
+            if (!ReadFString(body, ref pos, out var pathName)) break; // pathName (instance)
+            instances.Add(pathName);
+            pos += 4;                                                 // ObjectFlags
+            if (isActor == 1)
+                pos += 4 + 16 + 12 + 12 + 4;                          // needTransform + quat + pos + scale + wasPlaced
+            else if (!ReadFString(body, ref pos, out _)) break;       // OuterPathName
+        }
+        return instances;
+    }
+
+    /// <summary>Walk the Data blob's object blobs in order (positional with the TOC), scanning each
+    /// blob for its <c>mConnectedComponent</c> and recording owner-instance → target-component.</summary>
+    private static void WalkDataLinks(byte[] body, int dataStart, List<string> instances, Dictionary<string, string> links)
+    {
+        var pos = dataStart;
+        var count = BitConverter.ToInt32(body, pos); pos += 4;
+        var n = Math.Min(count, instances.Count);
+        for (var i = 0; i < n; i++)
+        {
+            if (pos + 12 > body.Length) break;
+            var saveVer = BitConverter.ToInt32(body, pos); pos += 4;  // per-object save version
+            pos += 4;                                                 // ShouldMigrateObjectRefsToPersistent (int32)
+            var dataLen = BitConverter.ToInt32(body, pos); pos += 4;
+            if (dataLen < 0 || pos + dataLen > body.Length) break;
+
+            var target = FindLinkTarget(body, pos, dataLen);
+            if (target is not null) links[instances[i]] = target;
+
+            pos += dataLen;
+            if (saveVer >= 53)                                        // [>=53] per-object version data
+            {
+                if (pos + 4 > body.Length) break;
+                if (BitConverter.ToInt32(body, pos) != 0) { pos += 4; SkipObjectVersionData(body, ref pos); }
+                else pos += 4;
+            }
+        }
+    }
+
+    /// <summary>The <c>mConnectedComponent</c> target path inside one object's data blob: the first
+    /// instance-path string (contains ':') after the property name.</summary>
+    private static string? FindLinkTarget(byte[] body, int start, int len)
+    {
+        var at = IndexOf(body, ConnMarker, start, start + len);
+        if (at < 0) return null;
+        var p = at + ConnMarker.Length;
+        var end = start + len;
+        var run = new System.Text.StringBuilder();
+        for (var i = p; i < end; i++)
+        {
+            var b = body[i];
+            if (b is >= 32 and < 127) run.Append((char)b);
+            else
+            {
+                if (run.Length >= 8 && run.ToString() is var s && s.Contains(':') && s.Contains('.'))
+                    return s;
+                run.Clear();
+            }
+        }
+        return null;
+    }
+
+    /// <summary>Skip an FSaveObjectVersionData: version ints, FEngineVersion, branch FString,
+    /// and the custom-version array (GUID + int32 each).</summary>
+    private static void SkipObjectVersionData(byte[] body, ref int pos)
+    {
+        pos += 4 + 4 + 4 + 4 + 2 + 2 + 2 + 4; // version, UE4, UE5, licensee, major/minor/patch, changelist
+        ReadFString(body, ref pos, out _);    // branch
+        var customCount = BitConverter.ToInt32(body, pos); pos += 4;
+        pos += customCount * (16 + 4);
+    }
+
+    private static bool ReadFString(byte[] body, ref int pos, out string value)
+    {
+        value = string.Empty;
+        if (pos + 4 > body.Length) return false;
+        var len = BitConverter.ToInt32(body, pos); pos += 4;
+        if (len == 0) return true;
+        if (len > 0)
+        {
+            if (len > 1 << 20 || pos + len > body.Length) return false;
+            value = Encoding.ASCII.GetString(body, pos, len - 1);
+            pos += len;
+        }
+        else
+        {
+            var n = -len;
+            if (n > 1 << 20 || pos + n * 2 > body.Length) return false;
+            value = Encoding.Unicode.GetString(body, pos, (n - 1) * 2);
+            pos += n * 2;
+        }
+        return true;
+    }
+
     // ------------------------------------------------- unlocked schematics
 
     private const string PurchasedSchematicsProperty = "mPurchasedSchematics";
