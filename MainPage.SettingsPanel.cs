@@ -158,18 +158,21 @@ public partial class MainPage
             var recipeSummary = await ApplyUnlockedRecipesFromSaveAsync(picked.FullPath);
 
             // Offer to place the save's built machines onto the map (one undoable step), wired up
-            // from the save's belt/pipe graph and grouped into outposts by location.
-            var (factories, connections) = SaveImport.Build(world, _state.Data);
+            // from the save's belt/pipe graph, with parallel manifolds collapsed into counted
+            // nodes and the result grouped into outposts by location.
+            var (rawNodes, rawConnections) = SaveImport.Build(world, _state.Data);
+            var (factories, connections) = SaveConsolidation.Consolidate(rawNodes, rawConnections);
             var placed = 0;
             var outpostCount = 0;
             var wireCount = 0;
             if (factories.Count > 0
                 && await DisplayAlertAsync("Import built factories",
-                    $"This save has {factories.Count} machine(s) we can place on the map "
-                    + "at their real locations (miners snapped to their nodes), wired up from the "
-                    + "belt/pipe connections and grouped into outposts. Add them to the current factory?\n\n"
-                    + "Extractors and machines keep their real recipe; belt/pipe connections are "
-                    + "recovered, but vehicle (train/truck/drone) links aren't imported yet.",
+                    $"This save has {rawNodes.Count} machine(s) we can place on the map at their real "
+                    + $"locations, wired from the belt/pipe connections. Parallel machines (manifolds / "
+                    + $"load-balancers) are merged into {factories.Count} counted nodes and grouped into "
+                    + "outposts. Add them to the current factory?\n\n"
+                    + "Extractors and machines keep their real recipe; vehicle (train/truck/drone) "
+                    + "links aren't imported yet.",
                     "Place machines", "Skip"))
             {
                 var outposts = SaveClustering.GroupByLocation(factories, _state.Data, SaveClustering.DefaultRadius);
@@ -182,7 +185,7 @@ public partial class MainPage
             }
 
             var placedLine = placed > 0
-                ? $"\nPlaced {placed} machine(s) in {outpostCount} outpost(s), {wireCount} connection(s)."
+                ? $"\nPlaced {placed} node(s) in {outpostCount} outpost(s), {wireCount} connection(s)."
                 : "";
             await DisplayAlertAsync("Import save",
                 $"Imported {world.ResourceNodes.Count} resource node(s).{placedLine}\n{recipeSummary}", "OK");
