@@ -21,10 +21,10 @@ public sealed class SaveBuilding
     public double Y { get; set; }
     public double Z { get; set; }
 
-    /// <summary>Clock as a fraction (1 = 100%) from <c>mCurrentPotential</c>; defaults to 100%
-    /// (per-building clock parsing is not wired yet, so this stays at 100% on import).</summary>
+    /// <summary>Clock as a fraction (1 = 100%) from <c>mCurrentPotential</c>; 100% when the save
+    /// omits the property (the default is not serialized).</summary>
     public Rational ClockSpeed { get; set; } = Rational.One;
 
-    /// <summary>Production shards (Somersloops) installed.</summary>
+    /// <summary>Somersloops installed (counted from the machine's potential-inventory items).</summary>
     public int Somersloops { get; set; }
 }

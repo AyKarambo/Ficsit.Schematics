@@ -59,13 +59,30 @@ public static class SatisfactorySaveReader
     private static readonly byte[] ConnMarker = Encoding.ASCII.GetBytes("mConnectedComponent");
 
     internal static Dictionary<string, string> ReadComponentLinksFromBody(byte[] body)
+        => ScanObjectDataFromBody(body).Links;
+
+    /// <summary>Everything the per-object data walk attributes to owners, keyed by instance path.</summary>
+    internal sealed class ObjectDataScan
     {
-        var links = new Dictionary<string, string>(StringComparer.Ordinal);
-        if (FindPersistentLevelBlobs(body) is not { } blobs) return links;
+        /// <summary>Component → connected component (<c>mConnectedComponent</c>).</summary>
+        public Dictionary<string, string> Links { get; } = new(StringComparer.Ordinal);
+
+        /// <summary>Machine → clock fraction (<c>mCurrentPotential</c>; present only when the
+        /// clock was changed — the 100% default is not serialized).</summary>
+        public Dictionary<string, float> Clocks { get; } = new(StringComparer.Ordinal);
+
+        /// <summary>Machine → Somersloops installed in its potential inventory.</summary>
+        public Dictionary<string, int> Somersloops { get; } = new(StringComparer.Ordinal);
+    }
+
+    internal static ObjectDataScan ScanObjectDataFromBody(byte[] body)
+    {
+        var scan = new ObjectDataScan();
+        if (FindPersistentLevelBlobs(body) is not { } blobs) return scan;
 
         var instances = WalkTocInstances(body, blobs.TocStart);
-        WalkDataLinks(body, blobs.DataStart, instances, links);
-        return links;
+        WalkObjectData(body, blobs.DataStart, instances, scan);
+        return scan;
     }
 
     /// <summary>
@@ -124,9 +141,13 @@ public static class SatisfactorySaveReader
         return instances;
     }
 
+    private const string PotentialInventorySuffix = ".InventoryPotential";
+
     /// <summary>Walk the Data blob's object blobs in order (positional with the TOC), scanning each
-    /// blob for its <c>mConnectedComponent</c> and recording owner-instance → target-component.</summary>
-    private static void WalkDataLinks(byte[] body, int dataStart, List<string> instances, Dictionary<string, string> links)
+    /// blob for what we attribute to its owner: <c>mConnectedComponent</c> (belt/pipe wiring),
+    /// <c>mCurrentPotential</c> (clock), and — on <c>.InventoryPotential</c> components — the
+    /// Somersloop stacks, credited to the machine that owns the inventory.</summary>
+    private static void WalkObjectData(byte[] body, int dataStart, List<string> instances, ObjectDataScan scan)
     {
         var pos = dataStart;
         var count = BitConverter.ToInt32(body, pos); pos += 4;
@@ -139,8 +160,12 @@ public static class SatisfactorySaveReader
             var dataLen = BitConverter.ToInt32(body, pos); pos += 4;
             if (dataLen < 0 || pos + dataLen > body.Length) break;
 
-            var target = FindLinkTarget(body, pos, dataLen);
-            if (target is not null) links[instances[i]] = target;
+            var instance = instances[i];
+            if (FindLinkTarget(body, pos, dataLen) is { } target) scan.Links[instance] = target;
+            if (FindClockValue(body, pos, dataLen) is { } clock) scan.Clocks[instance] = clock;
+            if (instance.EndsWith(PotentialInventorySuffix, StringComparison.Ordinal)
+                && CountSomersloops(body, pos, dataLen) is > 0 and var sloops)
+                scan.Somersloops[instance[..^PotentialInventorySuffix.Length]] = sloops;
 
             pos += dataLen;
             if (saveVer >= 53)                                        // [>=53] per-object version data
@@ -173,6 +198,72 @@ public static class SatisfactorySaveReader
             }
         }
         return null;
+    }
+
+    private static readonly byte[] ClockMarker = Encoding.ASCII.GetBytes("mCurrentPotential");
+    private static readonly byte[] FloatPropertyMarker = Encoding.ASCII.GetBytes("FloatProperty");
+    private static readonly byte[] SloopMarker = Encoding.ASCII.GetBytes("Desc_WAT1.Desc_WAT1_C");
+    private static readonly byte[] NumItemsMarker = Encoding.ASCII.GetBytes("NumItems");
+    private static readonly byte[] IntPropertyMarker = Encoding.ASCII.GetBytes("IntProperty");
+
+    /// <summary>The <c>mCurrentPotential</c> float inside one object's data blob — the machine's
+    /// clock as a fraction (0.4 = 40%) — or null when the property isn't there. Framing (verified
+    /// against a real save): name FString, "FloatProperty" FString, two int32s of which one is the
+    /// payload size 4, a zero byte, then the float.</summary>
+    private static float? FindClockValue(byte[] body, int start, int len)
+    {
+        var end = start + len;
+        var at = IndexOf(body, ClockMarker, start, end);
+        if (at < 0 || at < 4) return null;
+        if (BitConverter.ToInt32(body, at - 4) != ClockMarker.Length + 1) return null;   // FString length
+        if (body[at + ClockMarker.Length] != 0) return null;                              // exact name
+        var p = at + ClockMarker.Length + 1;
+        if (!IsFString(body, ref p, FloatPropertyMarker, end)) return null;
+        if (p + 13 > end) return null;
+        var a = BitConverter.ToInt32(body, p);
+        var b = BitConverter.ToInt32(body, p + 4);
+        if ((a != 4 && b != 4) || body[p + 8] != 0) return null;                          // size + pad byte
+        return BitConverter.ToSingle(body, p + 9);
+    }
+
+    /// <summary>Somersloops inside one potential-inventory blob: the summed <c>NumItems</c> of its
+    /// <c>Desc_WAT1</c> (Somersloop) stacks. The overclocking shard slots share this inventory, so
+    /// the item class is the filter; a vacated slot can keep the class with <c>NumItems</c> 0, and
+    /// the building's cached <c>mCurrentProductionBoost</c> can go stale — the items are the truth.</summary>
+    private static int CountSomersloops(byte[] body, int start, int len)
+    {
+        var end = start + len;
+        var total = 0;
+        var pos = start;
+        while (true)
+        {
+            var at = IndexOf(body, SloopMarker, pos, end);
+            if (at < 0) break;
+            pos = at + SloopMarker.Length;
+
+            var numAt = IndexOf(body, NumItemsMarker, pos, end);
+            if (numAt < 4 || BitConverter.ToInt32(body, numAt - 4) != NumItemsMarker.Length + 1
+                || body[numAt + NumItemsMarker.Length] != 0) continue;
+            var p = numAt + NumItemsMarker.Length + 1;
+            if (!IsFString(body, ref p, IntPropertyMarker, end)) continue;
+            if (p + 13 > end) break;
+            var count = BitConverter.ToInt32(body, p + 9);                                // size/index + pad
+            if (count is > 0 and <= 100) total += count;
+        }
+        return total;
+    }
+
+    /// <summary>True when an FString holding exactly <paramref name="text"/> sits at
+    /// <paramref name="pos"/> (length prefix, bytes, null terminator); advances past it.</summary>
+    private static bool IsFString(byte[] body, ref int pos, byte[] text, int end)
+    {
+        if (pos + 4 + text.Length + 1 > end) return false;
+        if (BitConverter.ToInt32(body, pos) != text.Length + 1) return false;
+        for (var j = 0; j < text.Length; j++)
+            if (body[pos + 4 + j] != text[j]) return false;
+        if (body[pos + 4 + text.Length] != 0) return false;
+        pos += 4 + text.Length + 1;
+        return true;
     }
 
     /// <summary>Skip an FSaveObjectVersionData: version ints, FEngineVersion, branch FString,
@@ -330,17 +421,35 @@ public static class SatisfactorySaveReader
     /// </summary>
     public static SaveWorld ReadWorld(string filePath) => ReadWorld(File.ReadAllBytes(filePath));
 
-    public static SaveWorld ReadWorld(byte[] saveFile)
+    public static SaveWorld ReadWorld(byte[] saveFile) => ReadWorldFromBody(DecompressBody(saveFile));
+
+    /// <summary><see cref="ReadWorld(byte[])"/> over an already-inflated body. Public for unit
+    /// testing against a synthetic body.</summary>
+    public static SaveWorld ReadWorldFromBody(byte[] body)
     {
-        var body = DecompressBody(saveFile);
+        var scan = ScanObjectDataFromBody(body);
+        var buildings = ReadBuildingsFromBody(body);
+        foreach (var building in buildings)
+        {
+            // 0 < clock ≤ 2.5 is the game's valid range; anything else is a misparse — keep 100%.
+            if (scan.Clocks.TryGetValue(building.Instance, out var clock) && clock is > 0f and <= 2.5f)
+                building.ClockSpeed = ToClockFraction(clock);
+            if (scan.Somersloops.TryGetValue(building.Instance, out var sloops))
+                building.Somersloops = sloops;
+        }
         return new SaveWorld
         {
-            Buildings = ReadBuildingsFromBody(body),
+            Buildings = buildings,
             ResourceNodes = ReadResourceNodesFromBody(body),
             RecipeStems = ScanRecipeStems(body),
-            ComponentLinks = ReadComponentLinksFromBody(body),
+            ComponentLinks = scan.Links,
         };
     }
+
+    /// <summary>A serialized clock float as an exact fraction, rounded at the game's clock
+    /// precision (4 decimals of percent), so 0.333333343f reads back as exactly 33.3333%.</summary>
+    private static Numerics.Rational ToClockFraction(float value)
+        => new((long)Math.Round(value * 1_000_000.0), 1_000_000);
 
     /// <summary>
     /// Every <c>mCurrentRecipe</c> value in the inflated body, as a recipe-class stem

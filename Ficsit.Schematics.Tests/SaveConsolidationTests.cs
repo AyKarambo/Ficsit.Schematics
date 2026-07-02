@@ -63,6 +63,49 @@ public class SaveConsolidationTests
     }
 
     [Fact]
+    public void Different_clocks_do_not_merge()
+    {
+        // A machine at 150% is not the same as one at 100%, even behind the same manifold.
+        var source = N("Iron Ingot");
+        var fast = N("Iron Plate");
+        fast.ClockSpeed = new Core.Numerics.Rational(3, 2);
+        var slow = N("Iron Plate");
+        var sink = N("Reinforced Iron Plate");
+        var nodes = new[] { source, fast, slow, sink };
+        var conns = new[]
+        {
+            C(source, fast, "Iron Ingot"), C(source, slow, "Iron Ingot"),
+            C(fast, sink, "Iron Plate"), C(slow, sink, "Iron Plate"),
+        };
+
+        var (cNodes, _) = SaveConsolidation.Consolidate(nodes, conns);
+
+        Assert.Equal(2, cNodes.Count(n => n.Name == "Iron Plate")); // one per distinct clock
+    }
+
+    [Fact]
+    public void Merged_nodes_keep_their_shared_clock_and_sloops()
+    {
+        var source = N("Iron Ingot");
+        var c1 = N("Iron Plate");
+        var c2 = N("Iron Plate");
+        foreach (var c in new[] { c1, c2 })
+        {
+            c.ClockSpeed = new Core.Numerics.Rational(1, 2);
+            c.Somersloops = 1;
+        }
+        var nodes = new[] { source, c1, c2 };
+        var conns = new[] { C(source, c1, "Iron Ingot"), C(source, c2, "Iron Ingot") };
+
+        var (cNodes, _) = SaveConsolidation.Consolidate(nodes, conns);
+
+        var merged = Assert.Single(cNodes, n => n.Name == "Iron Plate");
+        Assert.Equal("2", merged.Max);
+        Assert.Equal(new Core.Numerics.Rational(1, 2), merged.ClockSpeed);
+        Assert.Equal(1, merged.Somersloops);
+    }
+
+    [Fact]
     public void Snapped_extractors_are_never_merged()
     {
         var smelter = N("Iron Ingot");

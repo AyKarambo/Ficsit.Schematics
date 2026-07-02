@@ -22,13 +22,14 @@ public static class SaveConsolidation
             if (sources.TryGetValue(c.To, out var ts)) ts.Add(c.From);
         }
 
-        // Group key: recipe identity + the exact set of neighbour machines on each side. Distinct
-        // manifolds making the same thing have different neighbours, so they don't merge.
+        // Group key: recipe identity (incl. clock and sloops — a machine at 50% is not the same
+        // as one at 100%) + the exact set of neighbour machines on each side. Distinct manifolds
+        // making the same thing have different neighbours, so they don't merge.
         string Key(FactoryNode n)
         {
             var src = string.Join(",", sources[n].Select(s => s.Id).OrderBy(x => x));
             var snk = string.Join(",", sinks[n].Select(s => s.Id).OrderBy(x => x));
-            return $"{n.Kind}|{n.Name}|{n.MachineVariant}|{n.Capacity}|S:{src}|T:{snk}";
+            return $"{n.Kind}|{n.Name}|{n.MachineVariant}|{n.Capacity}|{n.ClockSpeed}|{n.Somersloops}|S:{src}|T:{snk}";
         }
 
         var representative = new Dictionary<FactoryNode, FactoryNode>();
