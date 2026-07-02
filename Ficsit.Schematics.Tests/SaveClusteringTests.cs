@@ -59,19 +59,21 @@ public class SaveClusteringTests
     }
 
     [Fact]
-    public void Sparse_machines_below_the_minimum_stay_loose()
+    public void A_two_node_mini_factory_becomes_an_outpost_but_lone_nodes_stay_loose()
     {
-        var nodes = new List<FactoryNode>
-        {
-            Machine("Iron Rod", 0, 0),
-            Machine("Iron Rod", 10, 0), // only two together — below the 3-machine minimum
-            Machine("Wire", 9000, 9000), // lone machine
-        };
+        // Post-consolidation, two different nodes side by side are a deliberate mini-factory
+        // (a packager + its refinery); a single stray stays loose.
+        var rod = Machine("Iron Rod", 0, 0);
+        var screw = Machine("Screw", 10, 0);
+        var lone = Machine("Wire", 9000, 9000);
+        var nodes = new List<FactoryNode> { rod, screw, lone };
 
         var outposts = SaveClustering.GroupByLocation(nodes, TestData.Database, radius: 80);
 
-        Assert.Empty(outposts);
-        Assert.All(nodes, n => Assert.Null(n.Parent));
+        var outpost = Assert.Single(outposts);
+        Assert.Same(outpost, rod.Parent);
+        Assert.Same(outpost, screw.Parent);
+        Assert.Null(lone.Parent); // lone machine stays loose
     }
 
     [Fact]
@@ -84,7 +86,7 @@ public class SaveClusteringTests
 
         var outposts = SaveClustering.GroupByLocation(nodes, TestData.Database, radius: 80);
 
-        Assert.Empty(outposts); // only 2 loose machines remain → below the minimum
-        Assert.Same(existing, member.Parent);
+        Assert.Single(outposts); // the two loose machines form their own outpost…
+        Assert.Same(existing, member.Parent); // …but the already-grouped member is untouched
     }
 }

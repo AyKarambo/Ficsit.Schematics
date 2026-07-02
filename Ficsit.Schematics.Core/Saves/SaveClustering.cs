@@ -15,9 +15,11 @@ public static class SaveClustering
     /// <summary>Default proximity (canvas units = metres) within which machines join one outpost.</summary>
     public const double DefaultRadius = 80;
 
-    /// <summary>A cluster needs at least this many machines to become an outpost; smaller knots of
-    /// machines (and lone scattered extractors) stay loose at the root.</summary>
-    private const int MinClusterSize = 3;
+    /// <summary>A cluster needs at least this many nodes to become an outpost. Clustering runs on
+    /// consolidated counted nodes, so two surviving nodes near each other are two *different*
+    /// stations of one deliberate mini-factory (a packager + its refinery, "×20" banks included) —
+    /// only lone nodes (scattered extractors, single strays) stay loose at the root.</summary>
+    private const int MinClusterSize = 2;
 
     /// <summary>
     /// Cluster <paramref name="nodes"/> by proximity and create one outpost per dense cluster,
