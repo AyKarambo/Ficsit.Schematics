@@ -58,6 +58,25 @@ public sealed partial class FactoryCanvasDrawable
 
     private void DrawAdorners(ICanvas canvas)
     {
+        // Edge rail while dragging a wire inside an outpost: release here to wire the port to
+        // the outer world (left = fed from outside, right = sent out).
+        if (EdgeDropZone is { } left)
+        {
+            const float edgeBandW = 90f;
+            var edgeBand = left
+                ? new RectF(0, 0, edgeBandW, _viewport.Height)
+                : new RectF(_viewport.Width - edgeBandW, 0, edgeBandW, _viewport.Height);
+            canvas.FillColor = Theme.SelectedBorder.WithAlpha(0.18f);
+            canvas.FillRectangle(edgeBand);
+            // Label sits near the top of the rail so it never collides with the released wire.
+            var labelRect = new RectF(edgeBand.X, 80f, edgeBand.Width, 24f);
+            canvas.FontColor = Theme.SelectedBorder;
+            canvas.FontSize = 12f;
+            canvas.Font = Microsoft.Maui.Graphics.Font.DefaultBold;
+            canvas.DrawString(left ? "◀ from outside" : "to outside ▶", labelRect,
+                HorizontalAlignment.Center, VerticalAlignment.Center);
+        }
+
         if (PendingWire is { } wire)
         {
             canvas.StrokeColor = Theme.SelectedBorder;

@@ -38,6 +38,11 @@ public sealed partial class FactoryCanvasDrawable(AppState state, IconStore icon
     /// a short bar between ports.</summary>
     public (float X, float Y, float Width)? PortInsertLine { get; set; }
 
+    /// <summary>While dragging a wire inside an outpost toward a screen edge: true = left rail
+    /// (feed this input from outside), false = right rail (send this output out), null = no
+    /// hint. Drawn as a translucent rail highlight.</summary>
+    public bool? EdgeDropZone { get; set; }
+
     /// <summary>Last drawn viewport width (screen px).</summary>
     public float ViewportWidth => _viewport.Width;
 

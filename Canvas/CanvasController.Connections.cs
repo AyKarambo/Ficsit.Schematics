@@ -28,6 +28,16 @@ public sealed partial class CanvasController
             return;
         }
 
+        // Dragging from an outpost box's own boundary port (at root): the port is auto-derived from
+        // a crossing connection, so resolve it back to the real member behind it and wire that member
+        // to the drop target — exactly the reverse of the drop-on-box case below. The target may be a
+        // plain machine or another outpost (whose matching member we resolve too).
+        if (_pressNode.Kind is NodeKind.Outpost or NodeKind.Blueprint && _pressPort.Part != "AnyPart")
+        {
+            CompleteOutpostPortDrag(_pressNode, _pressPort, targetNode, screen);
+            return;
+        }
+
         // Dropping a wire on an outpost box (at root) crosses the boundary: wire this node to a
         // member that can take/give the part. The crossing is a normal node→node connection — the
         // box port and the interior edge marker are auto-derived from it, no stored handle.
@@ -48,6 +58,14 @@ public sealed partial class CanvasController
 
         if (targetNode is null)
         {
+            // Inside an outpost, releasing on a side rail wires this port to the outer world:
+            // the first matching node out there, or the chooser to create one next to the box.
+            if (EdgeZoneFor(screen) is not null && state.Editor.ActiveOutpost is { } scope)
+            {
+                ConnectPortOutside(scope, _pressNode, _pressPort, screen);
+                return;
+            }
+
             // Dropped on empty canvas: offer compatible recipes for this port.
             OpenChooserForPort?.Invoke(
                 new PortDragContext(_pressNode, _pressPort.Part, !_pressPort.IsInput), screen);
@@ -59,6 +77,90 @@ public sealed partial class CanvasController
             state.Editor.Connect(fromNode!, partName!, toNode!);
             drawable.InvalidateLayouts();
         }
+    }
+
+    /// <summary>
+    /// Complete a drag that started on an outpost box's boundary port. The boundary port is just a
+    /// view of a crossing connection, so resolve it to the real member it stands for (the member
+    /// that consumes the part for an input port, or produces it for an output port) and wire that
+    /// member to the drop target like any node→node drag. An empty drop opens the recipe chooser for
+    /// the member; a drop on another outpost resolves that side's member too.
+    /// </summary>
+    private void CompleteOutpostPortDrag(FactoryNode outpost, PortInfo port, FactoryNode? targetNode, PointF screen)
+    {
+        var member = FirstMemberForPart(outpost, port.Part, wantConsumer: port.IsInput);
+        if (member is null) return;
+
+        if (targetNode is null)
+        {
+            // The member sits on the same side as the box port (consumes an input, produces an output).
+            OpenChooserForPort?.Invoke(new PortDragContext(member, port.Part, FromOutput: !port.IsInput), screen);
+            return;
+        }
+        if (targetNode == outpost) return;
+
+        // Resolve the other end: a plain machine is itself; an outpost contributes its matching member.
+        var other = targetNode.Kind is NodeKind.Outpost or NodeKind.Blueprint
+            ? FirstMemberForPart(targetNode, port.Part, wantConsumer: !port.IsInput)
+            : targetNode;
+        if (other is null || other == member) return;
+
+        // The box port's side fixes producer/consumer: an input port is fed (member consumes), an
+        // output port emits (member produces). Reuse the normal endpoint validation either way.
+        var producer = port.IsInput ? other : member;
+        var consumer = port.IsInput ? member : other;
+        if (TryResolveEndpoints(producer, new PortInfo(port.Part, RectF.Zero, false),
+                consumer, new PortInfo(port.Part, RectF.Zero, true), out var from, out var part, out var to))
+        {
+            state.Editor.Connect(from!, part!, to!);
+            drawable.InvalidateLayouts();
+        }
+    }
+
+    /// <summary>
+    /// Wire a member's port to the outer world (edge-rail drop inside an outpost): connect the
+    /// first node outside the outpost that can supply (input port) or take (output port) the
+    /// part; without one, open the chooser flagged Outside so the chosen machine is created next
+    /// to the outpost box at the level above. Either way the result is a normal crossing
+    /// connection — the boundary markers derive from it.
+    /// </summary>
+    private void ConnectPortOutside(FactoryNode outpost, FactoryNode member, PortInfo port, PointF screen)
+    {
+        var wantProducer = port.IsInput;
+        var outside = FirstOutsiderForPart(outpost, port.Part, wantProducer);
+        if (outside is not null)
+        {
+            if (wantProducer) state.Editor.Connect(outside, port.Part, member);
+            else state.Editor.Connect(member, port.Part, outside);
+            drawable.InvalidateLayouts();
+            return;
+        }
+        OpenChooserForPort?.Invoke(
+            new PortDragContext(member, port.Part, !port.IsInput, Outside: true), screen);
+    }
+
+    /// <summary>First node outside <paramref name="outpost"/> that produces (when
+    /// <paramref name="wantProducer"/>) or consumes <paramref name="part"/> — a recipe with a
+    /// matching output/input, or a generator that emits/takes it.</summary>
+    private FactoryNode? FirstOutsiderForPart(FactoryNode outpost, string part, bool wantProducer)
+    {
+        foreach (var n in state.Editor.Graph.Nodes)
+        {
+            if (n.Kind is NodeKind.Outpost or NodeKind.Blueprint || NodeLayout.IsInside(n, outpost)) continue;
+            if (n.Kind == NodeKind.Recipe && state.Data.RecipesByName.TryGetValue(n.Name, out var recipe))
+            {
+                if (wantProducer
+                        ? recipe.Outputs.Any(o => o.Part == part)
+                        : recipe.Inputs.Any(i => i.Part == part))
+                    return n;
+            }
+            else if (n.Kind == NodeKind.Generator
+                     && (wantProducer ? GeneratorEmits(n.Name, part) : GeneratorTakes(n.Name, part)))
+            {
+                return n;
+            }
+        }
+        return null;
     }
 
     /// <summary>First member of <paramref name="outpost"/> (at any depth) that can take or give

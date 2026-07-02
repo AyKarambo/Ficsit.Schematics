@@ -122,6 +122,18 @@ public partial class MainPage
 
         var node = _state.Editor.AddNode(name, x, y);
 
+        // An edge-rail drop inside an outpost creates the machine OUTSIDE: at the level above,
+        // beside the box (producers on the left, consumers on the right), so the connection
+        // below is a boundary crossing.
+        if (pending is { Outside: true } && _state.Editor.ActiveOutpost is { } scope)
+        {
+            node.Parent = scope.Parent;
+            node.X = pending.Value.FromOutput
+                ? scope.X + NodeLayout.CardWidth + 80
+                : scope.X - NodeLayout.CardWidth - 80;
+            node.Y = scope.Y;
+        }
+
         if (pending is { } context && context.Part != "AnyPart")
         {
             if (context.FromOutput && NodeAccepts(node, context.Part))
