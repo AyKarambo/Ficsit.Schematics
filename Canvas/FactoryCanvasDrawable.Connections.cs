@@ -14,11 +14,13 @@ public sealed partial class FactoryCanvasDrawable
     // Red tint for over-capacity connections.
     private static readonly Color OverCapacityColor = Color.FromArgb("#CC3300");
 
-    // An auto-derived outpost boundary marker (no stored handle): a small chip at the member's
-    // port for a connection that crosses the active outpost's boundary (incoming on the left,
-    // outgoing on the right). The wire runs member-port ↔ marker.
-    private const float BoundaryMarkerSize = 20f;
-    private const float BoundaryMarkerGap = 26f;
+    // Auto-derived outpost boundary chips (no stored handles): one per crossing part, pinned to
+    // the viewport sides in fixed screen slots — incoming parts on the left rail, outgoing on
+    // the right — so they never move with the members. Wires run chip ↔ member port.
+    private const float BoundaryMarkerSize = 22f;
+    private const float RailMarginPx = 14f;
+    private const float RailTopPx = 96f;
+    private const float RailGapPx = 10f;
 
     // Vehicle logistics links (truck/drone/train) draw dashed so they read as "shipped, not belted".
     private static readonly float[] LogisticsDash = [8f, 5f];
@@ -32,16 +34,7 @@ public sealed partial class FactoryCanvasDrawable
         var fromNode = VisibleRep(connection.From);
         var toNode = VisibleRep(connection.To);
         if (fromNode == toNode) return; // wholly inside one box, or both outside this scope
-
-        // A connection with exactly one end in the current scope crosses the active outpost's
-        // boundary: draw the member side to an auto-derived edge marker.
-        if (state.Editor.ActiveOutpost is not null && fromNode is null != (toNode is null))
-        {
-            DrawCrossingConnection(canvas, connection, layouts, result, incoming: toNode is not null);
-            return;
-        }
-
-        if (fromNode is null || toNode is null) return;
+        if (fromNode is null || toNode is null) return; // crossings draw as boundary rails
         if (!layouts.TryGetValue(fromNode, out var fromLayout)
             || !layouts.TryGetValue(toNode, out var toLayout))
             return;
@@ -96,50 +89,72 @@ public sealed partial class FactoryCanvasDrawable
     }
 
     /// <summary>
-    /// Draw a boundary-crossing connection inside an outpost: the member's port wired to a small
-    /// edge marker carrying the crossing part. <paramref name="incoming"/> = a part fed in from
-    /// outside (marker on the member's input, left); otherwise a part sent out (output, right).
+    /// Draw the active outpost's boundary as pinned side rails: one chip per crossing part —
+    /// incoming on the left rail, outgoing on the right, stacked top-down at fixed screen
+    /// positions (they hold still while the interior pans/zooms and never move with the
+    /// members) — with a wire from the chip to every member port it feeds or drains.
     /// </summary>
-    private void DrawCrossingConnection(
+    private void DrawBoundaryRails(
         ICanvas canvas,
-        NodeConnection connection,
+        List<(NodeConnection Connection, bool Incoming)> crossings,
         IReadOnlyDictionary<FactoryNode, NodeLayout> layouts,
-        SolveResult result,
-        bool incoming)
+        SolveResult result)
     {
-        var memberNode = incoming ? VisibleRep(connection.To) : VisibleRep(connection.From);
-        if (memberNode is null || !layouts.TryGetValue(memberNode, out var layout)) return;
+        if (crossings.Count == 0) return;
 
-        var ports = incoming ? layout.Inputs : layout.Outputs;
-        var port = ports.FirstOrDefault(p => p.Part == connection.Part);
-        var anchor = port is not null
-            ? layout.PortAnchor(port)
-            : new PointF(incoming ? layout.Bounds.Left : layout.Bounds.Right, layout.Bounds.Center.Y);
+        // Assign each (side, part) its rail slot in first-seen order; positions are derived
+        // from the screen rail each frame, so pan/zoom can't carry them away.
+        var chips = new Dictionary<(bool Incoming, string Part), RectF>();
+        var slotCount = new int[2];
+        foreach (var (connection, incoming) in crossings)
+        {
+            var key = (incoming, connection.Part);
+            if (chips.ContainsKey(key)) continue;
+            var slot = slotCount[incoming ? 0 : 1]++;
+            var sizePx = BoundaryMarkerSize * Zoom;
+            var screenX = incoming
+                ? RailMarginPx
+                : MathF.Max(RailMarginPx, _viewport.Width - RailMarginPx - sizePx);
+            var screenY = RailTopPx + slot * (sizePx + RailGapPx);
+            var topLeft = ScreenToWorld(new PointF(screenX, screenY));
+            chips[key] = new RectF(topLeft.X, topLeft.Y, BoundaryMarkerSize, BoundaryMarkerSize);
+        }
 
-        var markerX = incoming
-            ? anchor.X - BoundaryMarkerGap - BoundaryMarkerSize
-            : anchor.X + BoundaryMarkerGap;
-        var markerRect = new RectF(markerX, anchor.Y - BoundaryMarkerSize / 2, BoundaryMarkerSize, BoundaryMarkerSize);
-        var markerAnchor = new PointF(incoming ? markerRect.Right : markerRect.Left, anchor.Y);
+        foreach (var (connection, incoming) in crossings)
+        {
+            var member = incoming ? VisibleRep(connection.To) : VisibleRep(connection.From);
+            if (member is null || !layouts.TryGetValue(member, out var layout)) continue;
 
-        var start = incoming ? markerAnchor : anchor;
-        var end = incoming ? anchor : markerAnchor;
+            var ports = incoming ? layout.Inputs : layout.Outputs;
+            var port = ports.FirstOrDefault(p => p.Part == connection.Part);
+            var anchor = port is not null
+                ? layout.PortAnchor(port)
+                : new PointF(incoming ? layout.Bounds.Left : layout.Bounds.Right, layout.Bounds.Center.Y);
 
-        var flow = result.FlowOf(connection);
-        canvas.StrokeColor = state.Settings.WireColorByPart ? PartPalette.ColorFor(connection.Part) : Theme.Wire;
-        canvas.StrokeSize = 2f;
-        if (connection.Logistics != LogisticsKind.None) canvas.StrokeDashPattern = LogisticsDash;
-        var mid = DrawWirePath(canvas, start, end);
-        canvas.StrokeDashPattern = null;
+            var chip = chips[(incoming, connection.Part)];
+            var chipAnchor = new PointF(incoming ? chip.Right : chip.Left, chip.Center.Y);
+            var start = incoming ? chipAnchor : anchor;
+            var end = incoming ? anchor : chipAnchor;
 
-        // Marker chip with the part icon, then the flow label on the wire.
-        canvas.FillColor = Theme.PortChip;
-        canvas.FillRoundedRectangle(markerRect, 5f);
-        var icon = icons.GetImage(connection.Part);
-        if (icon is not null)
-            canvas.DrawImage(icon, markerRect.X + 1, markerRect.Y + 1, markerRect.Width - 2, markerRect.Height - 2);
-        if (flow > Rational.Zero)
-            DrawLabelPill(canvas, numbers.Connection(flow), mid.X, mid.Y, anchorRight: false);
+            var flow = result.FlowOf(connection);
+            canvas.StrokeColor = state.Settings.WireColorByPart ? PartPalette.ColorFor(connection.Part) : Theme.Wire;
+            canvas.StrokeSize = 2f;
+            if (connection.Logistics != LogisticsKind.None) canvas.StrokeDashPattern = LogisticsDash;
+            var mid = DrawWirePath(canvas, start, end);
+            canvas.StrokeDashPattern = null;
+            if (flow > Rational.Zero)
+                DrawLabelPill(canvas, numbers.Connection(flow), mid.X, mid.Y, anchorRight: false);
+        }
+
+        // Chips last, so they sit on top of their wires.
+        foreach (var ((_, part), rect) in chips)
+        {
+            canvas.FillColor = Theme.PortChip;
+            canvas.FillRoundedRectangle(rect, 5f);
+            var icon = icons.GetImage(part);
+            if (icon is not null)
+                canvas.DrawImage(icon, rect.X + 1, rect.Y + 1, rect.Width - 2, rect.Height - 2);
+        }
     }
 
     /// <summary>Stroke the wire from <paramref name="start"/> to <paramref name="end"/> in the

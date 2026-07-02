@@ -146,15 +146,28 @@ public sealed partial class FactoryCanvasDrawable(AppState state, IconStore icon
         var focusNeighbors = FocusNeighbors(focus);
 
         // Connections are flat; each end maps to its visible representative (the node itself
-        // or the outpost box it sits inside). Cross-boundary wires draw to the box.
+        // or the outpost box it sits inside). Inside an outpost, wires with exactly one end in
+        // scope cross the boundary — they collect here and draw as pinned side rails after.
+        var crossings = new List<(NodeConnection Connection, bool Incoming)>();
         foreach (var connection in state.Editor.Graph.Connections)
         {
+            if (state.Editor.ActiveOutpost is not null)
+            {
+                var fromRep = VisibleRep(connection.From);
+                var toRep = VisibleRep(connection.To);
+                if (fromRep is null != (toRep is null))
+                {
+                    crossings.Add((connection, Incoming: toRep is not null));
+                    continue;
+                }
+            }
             if (focus is not null)
                 canvas.Alpha = VisibleRep(connection.From) == focus || VisibleRep(connection.To) == focus
                     ? 1f : DimAlpha;
             DrawConnection(canvas, connection, layouts, result);
         }
         canvas.Alpha = 1f;
+        DrawBoundaryRails(canvas, crossings, layouts, result);
 
         foreach (var node in state.Editor.VisibleNodes)
             if (layouts.TryGetValue(node, out var layout))
