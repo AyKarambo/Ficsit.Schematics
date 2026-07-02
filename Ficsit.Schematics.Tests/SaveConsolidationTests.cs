@@ -36,18 +36,89 @@ public class SaveConsolidationTests
     }
 
     [Fact]
-    public void Same_recipe_with_different_neighbours_does_not_merge()
+    public void Parallel_identical_chains_merge_into_a_counted_chain()
     {
+        // Three dedicated side-by-side lines smelter_i → plate_i → assembler_i (nobody shares a
+        // belt) must still collapse into ×3 → ×3 → ×3: the neighbours are equivalent, class for
+        // class, even though they aren't the same machines.
+        var nodes = new List<FactoryNode>();
+        var conns = new List<NodeConnection>();
+        for (var i = 0; i < 3; i++)
+        {
+            var smelter = N("Iron Ingot"); smelter.X = i * 10;
+            var plate = N("Iron Plate"); plate.X = i * 10; plate.Y = 10;
+            var assembler = N("Reinforced Iron Plate"); assembler.X = i * 10; assembler.Y = 20;
+            nodes.AddRange([smelter, plate, assembler]);
+            conns.Add(C(smelter, plate, "Iron Ingot"));
+            conns.Add(C(plate, assembler, "Iron Plate"));
+        }
+
+        var (cNodes, cConns) = SaveConsolidation.Consolidate(nodes, conns);
+
+        Assert.Equal(3, cNodes.Count);
+        Assert.All(cNodes, n => Assert.Equal("3", n.Max));
+        Assert.Equal(2, cConns.Count); // one Iron Ingot wire, one Iron Plate wire
+    }
+
+    [Fact]
+    public void A_machine_with_an_extra_tap_does_not_merge_with_its_plain_twin()
+    {
+        // Two side-by-side plate machines, but one also taps off to an extra consumer: their
+        // wiring shapes differ, so they stay apart. Their sources look identical one hop out
+        // (each feeds "a plate machine") and do merge — the shape rule is deliberately local.
         var s1 = N("Iron Ingot");
-        var s2 = N("Iron Ingot");
-        var a = N("Iron Plate"); // fed by s1
-        var b = N("Iron Plate"); // fed by s2 — different source, so a separate line
+        var s2 = N("Iron Ingot"); s2.X = 10;
+        var a = N("Iron Plate"); a.Y = 10;
+        var b = N("Iron Plate"); b.X = 10; b.Y = 10;
+        var extra = N("Reinforced Iron Plate"); extra.Y = 20;
+        var nodes = new[] { s1, s2, a, b, extra };
+        var conns = new[]
+        {
+            C(s1, a, "Iron Ingot"), C(s2, b, "Iron Ingot"),
+            C(b, extra, "Iron Plate"), // only line 2 feeds the assembler
+        };
+
+        var (cNodes, _) = SaveConsolidation.Consolidate(nodes, conns);
+
+        Assert.Equal(2, cNodes.Count(n => n.Name == "Iron Plate")); // the tapped one stays apart
+        var smelters = Assert.Single(cNodes, n => n.Name == "Iron Ingot");
+        Assert.Equal("2", smelters.Max);
+    }
+
+    [Fact]
+    public void Distant_parallel_lines_do_not_merge()
+    {
+        // Equivalent structure at two far-apart sites stays two sites.
+        var s1 = N("Iron Ingot");
+        var s2 = N("Iron Ingot"); s2.X = 5000;
+        var a = N("Iron Plate"); a.Y = 10;
+        var b = N("Iron Plate"); b.X = 5000; b.Y = 10;
         var nodes = new[] { s1, s2, a, b };
         var conns = new[] { C(s1, a, "Iron Ingot"), C(s2, b, "Iron Ingot") };
 
         var (cNodes, _) = SaveConsolidation.Consolidate(nodes, conns);
 
-        Assert.Equal(2, cNodes.Count(n => n.Name == "Iron Plate")); // not merged
+        Assert.Equal(4, cNodes.Count);
+    }
+
+    [Fact]
+    public void Twin_extractor_rooted_rows_merge_downstream()
+    {
+        // Two miners on separate map nodes (same ore/purity) each feed their own smelter: the
+        // miners stay pinned to their nodes, but the smelters are interchangeable and merge.
+        var m1 = N("Iron Ore"); m1.ResourceNodeId = "node-A";
+        var m2 = N("Iron Ore"); m2.ResourceNodeId = "node-B"; m2.X = 10;
+        var sm1 = N("Iron Ingot"); sm1.Y = 10;
+        var sm2 = N("Iron Ingot"); sm2.X = 10; sm2.Y = 10;
+        var nodes = new[] { m1, m2, sm1, sm2 };
+        var conns = new[] { C(m1, sm1, "Iron Ore"), C(m2, sm2, "Iron Ore") };
+
+        var (cNodes, cConns) = SaveConsolidation.Consolidate(nodes, conns);
+
+        Assert.Equal(2, cNodes.Count(n => n.ResourceNodeId is not null)); // both miners kept
+        var smelter = Assert.Single(cNodes, n => n.Name == "Iron Ingot");
+        Assert.Equal("2", smelter.Max);
+        Assert.Equal(2, cConns.Count); // each miner wired to the merged smelter
     }
 
     [Fact]

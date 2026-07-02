@@ -3,64 +3,65 @@ using Ficsit.Schematics.Core.Model;
 namespace Ficsit.Schematics.Core.Saves;
 
 /// <summary>
-/// Collapses parallel machines into one node with a count. Machines that run the same recipe and
-/// are wired to the same set of upstream and downstream machines are a manifold / load-balanced
-/// group (10 constructors all fed from the same source and feeding the same sink) — the user wants
-/// those shown as a single "Constructor ×10" node, regardless of the belt topology between them.
-/// Machines with no wiring at all (manual-fed banks, power-only machines) merge per adjacent row:
-/// same identity within <see cref="AdjacentRadius"/>, never across the map.
-/// Pure: takes the imported nodes + connections and returns the consolidated graph.
+/// Collapses parallel machines into one node with a count. Two machines merge when a pioneer
+/// would call them "the same machines side by side": same recipe identity (incl. clock and
+/// sloops), within <see cref="AdjacentRadius"/> of each other, and the same wiring shape — the
+/// set of (direction, part, coarse neighbour type) they touch. That covers a shared manifold,
+/// a load-balancer, N parallel dedicated lines (pump₁→packager₁→refinery₁ … collapses into
+/// "Packager ×N → Refinery ×N"), and unwired banks alike. The shape is deliberately one hop
+/// and clock-blind about the neighbours: real factories carry small quirks (a stray machine at
+/// 100%, a bank with one pump instead of two) that must not keep two rows apart — while a
+/// machine with an extra tap or a different part flowing still stays separate. Snapped
+/// extractors sit on distinct map nodes and are never merged themselves. Pure: takes the
+/// imported nodes + connections and returns the consolidated graph.
 /// </summary>
 public static class SaveConsolidation
 {
+    /// <summary>Machines merge only within this distance (canvas metres, chained). Sized for
+    /// banks of the big buildings (fuel generators, refineries: neighbouring banks sit 40–50 m
+    /// apart) while staying under the outpost-clustering radius (80 m) — a genuinely separate
+    /// site is hundreds of metres away.</summary>
+    private const double AdjacentRadius = 60;
+
     public static (IReadOnlyList<FactoryNode> Nodes, IReadOnlyList<NodeConnection> Connections) Consolidate(
         IReadOnlyList<FactoryNode> nodes, IReadOnlyList<NodeConnection> connections)
     {
-        var sources = nodes.ToDictionary(n => n, _ => new HashSet<FactoryNode>());
-        var sinks = nodes.ToDictionary(n => n, _ => new HashSet<FactoryNode>());
+        // What a machine is, exactly (merge candidates must match all of it) …
+        string Identity(FactoryNode n)
+            => $"{n.Kind}|{n.Name}|{n.MachineVariant}|{n.Capacity}|{n.ClockSpeed}|{n.Somersloops}";
+        // … and what a machine looks like as someone else's neighbour (coarse: no clock/sloops,
+        // so a quirky supplier doesn't split an otherwise identical row).
+        string Coarse(FactoryNode n) => $"{n.Kind}|{n.Name}|{n.MachineVariant}|{n.Capacity}";
+
+        var shapes = nodes.ToDictionary(n => n, _ => new SortedSet<string>(StringComparer.Ordinal));
         foreach (var c in connections)
         {
-            if (sinks.TryGetValue(c.From, out var fs)) fs.Add(c.To);
-            if (sources.TryGetValue(c.To, out var ts)) ts.Add(c.From);
-        }
-
-        // Group key: recipe identity (incl. clock and sloops — a machine at 50% is not the same
-        // as one at 100%) + the exact set of neighbour machines on each side. Distinct manifolds
-        // making the same thing have different neighbours, so they don't merge.
-        string Key(FactoryNode n)
-        {
-            var src = string.Join(",", sources[n].Select(s => s.Id).OrderBy(x => x));
-            var snk = string.Join(",", sinks[n].Select(s => s.Id).OrderBy(x => x));
-            return $"{n.Kind}|{n.Name}|{n.MachineVariant}|{n.Capacity}|{n.ClockSpeed}|{n.Somersloops}|S:{src}|T:{snk}";
+            if (shapes.TryGetValue(c.From, out var fs) && shapes.TryGetValue(c.To, out var ts))
+            {
+                fs.Add($">{c.Part}:{Coarse(c.To)}");
+                ts.Add($"<{c.Part}:{Coarse(c.From)}");
+            }
         }
 
         var representative = new Dictionary<FactoryNode, FactoryNode>();
         var result = new List<FactoryNode>();
         foreach (var group in nodes.GroupBy(n =>
-                     // Snapped extractors are physical machines on distinct nodes — never merged.
-                     n.ResourceNodeId is not null ? $"#{n.Id}" : Key(n)))
+                     // Snapped extractors are physical machines on distinct map nodes — never merged.
+                     n.ResourceNodeId is not null ? $"#{n.Id}" : $"{Identity(n)}|{string.Join(",", shapes[n])}"))
         {
             var members = group.ToList();
-            var first = members[0];
-            if (members.Count == 1 || first.ResourceNodeId is not null)
+            if (members.Count == 1 || members[0].ResourceNodeId is not null)
             {
                 foreach (var n in members) { representative[n] = n; result.Add(n); }
                 continue;
             }
 
-            if (sources[first].Count == 0 && sinks[first].Count == 0)
+            // Same identity + same wiring shape: merge per side-by-side row, never across the map.
+            foreach (var cluster in ProximityClusters(members, AdjacentRadius))
             {
-                // No wiring at all (manual-fed banks, power-only machines): merge per
-                // side-by-side row — same identity within arm's reach — never across the map.
-                foreach (var cluster in ProximityClusters(members, AdjacentRadius))
-                {
-                    if (cluster.Count == 1) { representative[cluster[0]] = cluster[0]; result.Add(cluster[0]); }
-                    else result.Add(Merge(cluster, representative));
-                }
-                continue;
+                if (cluster.Count == 1) { representative[cluster[0]] = cluster[0]; result.Add(cluster[0]); }
+                else result.Add(Merge(cluster, representative));
             }
-
-            result.Add(Merge(members, representative));
         }
 
         var mergedConnections = new List<NodeConnection>();
@@ -77,10 +78,6 @@ public static class SaveConsolidation
 
         return (result, mergedConnections);
     }
-
-    /// <summary>Isolated machines merge only within this distance (canvas metres): a machine row
-    /// is ~10 m spacing, a genuinely separate site is hundreds.</summary>
-    private const double AdjacentRadius = 40;
 
     private static FactoryNode Merge(List<FactoryNode> members, Dictionary<FactoryNode, FactoryNode> representative)
     {
