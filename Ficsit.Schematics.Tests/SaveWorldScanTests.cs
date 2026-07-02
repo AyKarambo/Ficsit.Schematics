@@ -1,4 +1,5 @@
 using System.Text;
+using Ficsit.Schematics.Core.Model;
 using Ficsit.Schematics.Core.Numerics;
 using Ficsit.Schematics.Core.Saves;
 using Xunit;
@@ -42,37 +43,75 @@ public class SaveWorldScanTests
         Assert.Equal(new Rational(1_333_333, 1_000_000), constructor.ClockSpeed);
     }
 
+    [Fact]
+    public void Reads_truck_networks_and_drone_pairs_into_vehicle_routes()
+    {
+        const string stationA = "Persistent_Level:PersistentLevel.Build_TruckStation_C_10";
+        const string stationB = "Persistent_Level:PersistentLevel.Build_TruckStation_C_20";
+        const string dockA = "Persistent_Level:PersistentLevel.Build_VehiclePathNode_DockingStation_C_11";
+        const string dockB = "Persistent_Level:PersistentLevel.Build_VehiclePathNode_DockingStation_C_21";
+        const string droneA = "Persistent_Level:PersistentLevel.Build_DroneStation_C_30";
+        const string droneB = "Persistent_Level:PersistentLevel.Build_DroneStation_C_31";
+
+        var world = SatisfactorySaveReader.ReadWorldFromBody(AssembleBody(
+            (w => WriteActorToc(w,
+                "/Game/FactoryGame/Buildable/Factory/TruckStation/Build_TruckStation.Build_TruckStation_C",
+                stationA), []),
+            (w => WriteActorToc(w,
+                "/Game/FactoryGame/Buildable/Factory/TruckStation/Build_TruckStation.Build_TruckStation_C",
+                stationB), []),
+            // Each station's docking path node: parent ref = the station, then the road-network id.
+            (w => WriteActorToc(w,
+                "/Game/FactoryGame/Buildable/Vehicle/VehiclePath/Build_VehiclePathNode_DockingStation.Build_VehiclePathNode_DockingStation_C",
+                dockA), DockingNodeSpan(stationA, networkId: 7)),
+            (w => WriteActorToc(w,
+                "/Game/FactoryGame/Buildable/Vehicle/VehiclePath/Build_VehiclePathNode_DockingStation.Build_VehiclePathNode_DockingStation_C",
+                dockB), DockingNodeSpan(stationB, networkId: 7)),
+            // Drone ports pair mutually; the pair must come out as one route.
+            (w => WriteActorToc(w,
+                "/Game/FactoryGame/Buildable/Factory/DroneStation/Build_DroneStation.Build_DroneStation_C",
+                droneA), PairedStationSpan(droneB)),
+            (w => WriteActorToc(w,
+                "/Game/FactoryGame/Buildable/Factory/DroneStation/Build_DroneStation.Build_DroneStation_C",
+                droneB), PairedStationSpan(droneA))));
+
+        var truck = Assert.Single(world.VehicleRoutes, r => r.Kind == LogisticsKind.Truck);
+        Assert.Equal([stationA, stationB], truck.Stations.OrderBy(s => s, StringComparer.Ordinal));
+        var drone = Assert.Single(world.VehicleRoutes, r => r.Kind == LogisticsKind.Drone);
+        Assert.Equal([droneA, droneB], drone.Stations.OrderBy(s => s, StringComparer.Ordinal));
+    }
+
     // ------------------------------------------------------------- body builder
+
+    private static byte[] BuildBody(float clock) => AssembleBody(
+        (w => WriteActorToc(w,
+            "/Game/FactoryGame/Buildable/Factory/ConstructorMk1/Build_ConstructorMk1.Build_ConstructorMk1_C",
+            Constructor), FloatProperty("mCurrentPotential", clock)),
+        (w => WriteObjectToc(w, "/Script/FactoryGame.FGInventoryComponent",
+            Constructor + ".InventoryPotential", Constructor),
+            [.. SloopStack(2), .. SloopStack(1), .. SloopStack(0)]),
+        (w => WriteActorToc(w,
+            "/Game/FactoryGame/Buildable/Factory/SmelterMk1/Build_SmelterMk1.Build_SmelterMk1_C",
+            Smelter), []),
+        (w => WriteObjectToc(w, "/Script/FactoryGame.FGFactoryConnectionComponent",
+            Constructor + ".Output0", Constructor), LinkProperty(Smelter + ".Input0")));
 
     /// <summary>A minimal persistent-level TOC+Data pair the blob locator accepts: ≥1000 objects,
     /// ≥100 KB of TOC, matching object counts, and a built machine in the TOC.</summary>
-    private static byte[] BuildBody(float clock)
+    private static byte[] AssembleBody(params (Action<BinaryWriter> WriteToc, byte[] Span)[] objects)
     {
         const int fillers = 1200;
         var spans = new List<byte[]>();
 
         using var tocMs = new MemoryStream();
         using var toc = new BinaryWriter(tocMs);
-        toc.Write(fillers + 4);
+        toc.Write(fillers + objects.Length);
 
-        WriteActorToc(toc,
-            "/Game/FactoryGame/Buildable/Factory/ConstructorMk1/Build_ConstructorMk1.Build_ConstructorMk1_C",
-            Constructor);
-        spans.Add(FloatProperty("mCurrentPotential", clock));
-
-        WriteObjectToc(toc, "/Script/FactoryGame.FGInventoryComponent",
-            Constructor + ".InventoryPotential", Constructor);
-        spans.Add([.. SloopStack(2), .. SloopStack(1), .. SloopStack(0)]);
-
-        WriteActorToc(toc,
-            "/Game/FactoryGame/Buildable/Factory/SmelterMk1/Build_SmelterMk1.Build_SmelterMk1_C",
-            Smelter);
-        spans.Add([]);
-
-        WriteObjectToc(toc, "/Script/FactoryGame.FGFactoryConnectionComponent",
-            Constructor + ".Output0", Constructor);
-        spans.Add(LinkProperty(Smelter + ".Input0"));
-
+        foreach (var (writeToc, span) in objects)
+        {
+            writeToc(toc);
+            spans.Add(span);
+        }
         for (var i = 0; i < fillers; i++)
         {
             WriteObjectToc(toc, "/Script/FactoryGame.PaddingObjectClassKeepsTocAboveTheMinimum",
@@ -85,7 +124,7 @@ public class SaveWorldScanTests
 
         using var dataMs = new MemoryStream();
         using var data = new BinaryWriter(dataMs);
-        data.Write(fillers + 4);
+        data.Write(spans.Count);
         foreach (var span in spans)
         {
             data.Write(46); // per-object save version (< 53 ⇒ no version tail)
@@ -170,6 +209,35 @@ public class SaveWorldScanTests
         using var ms = new MemoryStream();
         using var w = new BinaryWriter(ms);
         WriteFString(w, "mConnectedComponent");
+        WriteFString(w, "ObjectProperty");
+        w.Write(0); w.Write(38); w.Write((byte)0);
+        WriteFString(w, "Persistent_Level");
+        WriteFString(w, target);
+        w.Flush();
+        return ms.ToArray();
+    }
+
+    /// <summary>A docking path node's data: the parent-actor ref (its station) followed by the
+    /// road-network id property.</summary>
+    private static byte[] DockingNodeSpan(string station, int networkId)
+    {
+        using var ms = new MemoryStream();
+        using var w = new BinaryWriter(ms);
+        WriteFString(w, "Persistent_Level");
+        WriteFString(w, station);
+        WriteFString(w, "mPathNetworkID");
+        WriteFString(w, "IntProperty");
+        w.Write(4); w.Write(0); w.Write((byte)0);
+        w.Write(networkId);
+        w.Flush();
+        return ms.ToArray();
+    }
+
+    private static byte[] PairedStationSpan(string target)
+    {
+        using var ms = new MemoryStream();
+        using var w = new BinaryWriter(ms);
+        WriteFString(w, "mPairedStation");
         WriteFString(w, "ObjectProperty");
         w.Write(0); w.Write(38); w.Write((byte)0);
         WriteFString(w, "Persistent_Level");

@@ -34,6 +34,23 @@ public class SfmdSerializerTests
     }
 
     [Fact]
+    public void Roundtrip_preserves_a_connections_logistics_kind()
+    {
+        var doc = new FactoryDocument();
+        var producer = new FactoryNode { Name = "Iron Ingot", Kind = NodeKind.Recipe };
+        var consumer = new FactoryNode { Name = "Iron Plate", Kind = NodeKind.Recipe };
+        doc.Root.Nodes.AddRange([producer, consumer]);
+        doc.Root.Connections.Add(new NodeConnection
+            { From = producer, To = consumer, Part = "Iron Ingot", Logistics = LogisticsKind.Truck });
+
+        var reloaded = SfmdSerializer.Deserialize(SfmdSerializer.Serialize(doc));
+
+        var connection = Assert.Single(reloaded.Root.Connections);
+        Assert.Equal(LogisticsKind.Truck, connection.Logistics);
+        Assert.Equal("Iron Ingot", connection.Part);
+    }
+
+    [Fact]
     public void Roundtrip_preserves_structure()
     {
         var original = SfmdSerializer.Deserialize(File.ReadAllText(TestData.ReferenceSavePath));

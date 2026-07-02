@@ -106,6 +106,25 @@ public class SaveConsolidationTests
     }
 
     [Fact]
+    public void Merged_connections_keep_their_logistics_kind()
+    {
+        var source = N("Iron Ingot");
+        var c1 = N("Iron Plate");
+        var c2 = N("Iron Plate");
+        var nodes = new[] { source, c1, c2 };
+        var conns = new[]
+        {
+            new NodeConnection { From = source, To = c1, Part = "Iron Ingot", Logistics = LogisticsKind.Truck },
+            new NodeConnection { From = source, To = c2, Part = "Iron Ingot", Logistics = LogisticsKind.Truck },
+        };
+
+        var (_, cConns) = SaveConsolidation.Consolidate(nodes, conns);
+
+        var merged = Assert.Single(cConns);
+        Assert.Equal(LogisticsKind.Truck, merged.Logistics);
+    }
+
+    [Fact]
     public void Snapped_extractors_are_never_merged()
     {
         var smelter = N("Iron Ingot");

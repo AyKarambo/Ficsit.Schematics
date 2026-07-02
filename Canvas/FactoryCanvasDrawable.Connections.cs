@@ -20,6 +20,9 @@ public sealed partial class FactoryCanvasDrawable
     private const float BoundaryMarkerSize = 20f;
     private const float BoundaryMarkerGap = 26f;
 
+    // Vehicle logistics links (truck/drone/train) draw dashed so they read as "shipped, not belted".
+    private static readonly float[] LogisticsDash = [8f, 5f];
+
     private void DrawConnection(
         ICanvas canvas,
         NodeConnection connection,
@@ -54,10 +57,12 @@ public sealed partial class FactoryCanvasDrawable
             ? toLayout.PortAnchor(toPort)
             : new PointF(toLayout.Bounds.Left, toLayout.Bounds.Center.Y);
 
-        // Determine if this connection is over capacity.
+        // Determine if this connection is over capacity — vehicles aren't belts, so a
+        // logistics link never warns.
+        var isVehicle = connection.Logistics != LogisticsKind.None;
         var flow = result.FlowOf(connection);
         ConnectionOverflow? overflow = null;
-        if (state.Settings.ShowBeltCapacityWarnings && flow > Rational.Zero)
+        if (state.Settings.ShowBeltCapacityWarnings && !isVehicle && flow > Rational.Zero)
         {
             var isFluid = state.Data.PartsByName.TryGetValue(connection.Part, out var partDef) && partDef.Fluid;
             var threshold = isFluid ? state.Data.MaxPipeThroughput : state.Data.MaxBeltThroughput;
@@ -69,7 +74,9 @@ public sealed partial class FactoryCanvasDrawable
             : state.Settings.WireColorByPart ? PartPalette.ColorFor(connection.Part) : Theme.Wire;
         canvas.StrokeSize = overflow is not null ? 3f : 2f;
 
+        if (isVehicle) canvas.StrokeDashPattern = LogisticsDash;
         var mid = DrawWirePath(canvas, start, end);
+        if (isVehicle) canvas.StrokeDashPattern = null;
 
         // Mid label: part icon + flow ppm — pill treatment (Slice B #3).
         var icon = icons.GetImage(connection.Part);
@@ -78,6 +85,10 @@ public sealed partial class FactoryCanvasDrawable
             canvas.DrawImage(icon, mid.X - iconSize - 2, mid.Y - iconSize / 2, iconSize, iconSize);
         // The label sits to the right of the icon, centred on mid.Y.
         DrawLabelPill(canvas, numbers.Connection(flow), mid.X, mid.Y, anchorRight: false);
+
+        // The vehicle kind under the flow pill, so a truck hop reads differently from a belt.
+        if (isVehicle)
+            DrawLabelPill(canvas, connection.Logistics.ToString(), mid.X, mid.Y + 18, anchorRight: false);
 
         // Over-capacity warning: a small warning glyph (⚠) above the mid-point.
         if (overflow is not null)
@@ -117,7 +128,9 @@ public sealed partial class FactoryCanvasDrawable
         var flow = result.FlowOf(connection);
         canvas.StrokeColor = state.Settings.WireColorByPart ? PartPalette.ColorFor(connection.Part) : Theme.Wire;
         canvas.StrokeSize = 2f;
+        if (connection.Logistics != LogisticsKind.None) canvas.StrokeDashPattern = LogisticsDash;
         var mid = DrawWirePath(canvas, start, end);
+        canvas.StrokeDashPattern = null;
 
         // Marker chip with the part icon, then the flow label on the wire.
         canvas.FillColor = Theme.PortChip;

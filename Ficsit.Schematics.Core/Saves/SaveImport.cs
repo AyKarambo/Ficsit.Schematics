@@ -65,12 +65,33 @@ public static class SaveImport
         => PlaceBuildings(world, data).Nodes;
 
     /// <summary>Full import: machines placed at their world positions plus the connections recovered
-    /// from the save's belt/pipe graph (recipe-compatible producer→consumer edges).</summary>
+    /// from the save's belt/pipe graph (recipe-compatible producer→consumer edges) and its vehicle
+    /// circuits (the same edges across a truck road network or drone pairing, tagged with the
+    /// vehicle kind).</summary>
     public static (IReadOnlyList<FactoryNode> Nodes, IReadOnlyList<NodeConnection> Connections) Build(
         SaveWorld world, GameDatabase data)
     {
         var (nodes, byInstance) = PlaceBuildings(world, data);
-        return (nodes, BuildConnections(world, data, byInstance));
+        var connections = new List<NodeConnection>();
+        var seen = new HashSet<(int, int, string)>();
+
+        Materialize(SaveConnectionTracer.MachineEdges(world.ComponentLinks, IsModelledMachine),
+            byInstance, data, connections, seen, LogisticsKind.None);
+
+        // Vehicle circuits: wire each route's stations together as transport and re-trace. Belt
+        // edges reappear and are deduped, so the edges that survive are the vehicle-borne ones.
+        foreach (var group in world.VehicleRoutes.GroupBy(r => r.Kind))
+        {
+            var augmented = new Dictionary<string, string>(world.ComponentLinks, StringComparer.Ordinal);
+            var hop = 0;
+            foreach (var route in group)
+                for (var s = 1; s < route.Stations.Count; s++, hop++)
+                    augmented[$"{route.Stations[s - 1]}.VehicleRoute{hop}A"]
+                        = $"{route.Stations[s]}.VehicleRoute{hop}B";
+            Materialize(SaveConnectionTracer.MachineEdges(augmented, IsModelledMachine),
+                byInstance, data, connections, seen, group.Key);
+        }
+        return (nodes, connections);
     }
 
     private static (List<FactoryNode> Nodes, Dictionary<string, FactoryNode> ByInstance) PlaceBuildings(
@@ -135,24 +156,27 @@ public static class SaveImport
         return (nodes, byInstance);
     }
 
-    /// <summary>Materialize the traced machine→machine edges as recipe-compatible connections: an
-    /// edge becomes a connection only when the producer makes a part the consumer takes.</summary>
-    private static List<NodeConnection> BuildConnections(
-        SaveWorld world, GameDatabase data, Dictionary<string, FactoryNode> byInstance)
+    /// <summary>Materialize traced machine→machine edges as recipe-compatible connections: an
+    /// edge becomes a connection only when the producer makes a part the consumer takes. Edges
+    /// already materialized (in <paramref name="seen"/>) are skipped, so belt edges keep their
+    /// plain kind when a vehicle re-trace reproduces them.</summary>
+    private static void Materialize(
+        IReadOnlyList<(string From, string To)> edges,
+        Dictionary<string, FactoryNode> byInstance,
+        GameDatabase data,
+        List<NodeConnection> connections,
+        HashSet<(int, int, string)> seen,
+        LogisticsKind kind)
     {
-        var connections = new List<NodeConnection>();
-        var seen = new HashSet<(int, int, string)>();
-        foreach (var (fromInstance, toInstance) in
-                 SaveConnectionTracer.MachineEdges(world.ComponentLinks, IsModelledMachine))
+        foreach (var (fromInstance, toInstance) in edges)
         {
             if (!byInstance.TryGetValue(fromInstance, out var from)
                 || !byInstance.TryGetValue(toInstance, out var to) || from == to) continue;
             var part = OutputParts(from, data).FirstOrDefault(InputParts(to, data).Contains);
             if (part is null) continue;
             if (seen.Add((from.Id, to.Id, part)))
-                connections.Add(new NodeConnection { From = from, To = to, Part = part });
+                connections.Add(new NodeConnection { From = from, To = to, Part = part, Logistics = kind });
         }
-        return connections;
     }
 
     /// <summary>Parts a node can put out: its recipe's outputs (or, for a generator, its machine's

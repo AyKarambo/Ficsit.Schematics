@@ -20,4 +20,7 @@ public sealed class SaveWorld
     /// Traced into machine→machine edges by <see cref="SaveImport"/>.</summary>
     public IReadOnlyDictionary<string, string> ComponentLinks { get; init; } =
         new Dictionary<string, string>();
+
+    /// <summary>Vehicle circuits (truck road networks, drone pairs) between station instances.</summary>
+    public IReadOnlyList<SaveVehicleRoute> VehicleRoutes { get; init; } = [];
 }

@@ -66,9 +66,13 @@ public sealed partial class CanvasController
         {
             var flow = state.Editor.Result.FlowOf(connection);
             var baseTooltip = $"{loc.L(connection.Part)}: {numbers.ValueTooltip(flow)} {loc.L("PER_MINUTE")}";
+            if (connection.Logistics != LogisticsKind.None)
+                baseTooltip = $"{baseTooltip} · {connection.Logistics}";
 
-            // Augment with over-capacity warning when the setting is on.
-            if (state.Settings.ShowBeltCapacityWarnings && flow > Rational.Zero)
+            // Augment with over-capacity warning when the setting is on. A vehicle-borne
+            // (truck/drone/train) link isn't a belt, so it never warns.
+            if (state.Settings.ShowBeltCapacityWarnings && connection.Logistics == LogisticsKind.None
+                && flow > Rational.Zero)
             {
                 var isFluid = state.Data.PartsByName.TryGetValue(connection.Part, out var partDef) && partDef.Fluid;
                 var threshold = isFluid ? state.Data.MaxPipeThroughput : state.Data.MaxBeltThroughput;

@@ -9,6 +9,9 @@ public sealed class NodeConnection
     /// <summary>The part carried. Specialty nodes adopt whatever part is connected.</summary>
     public required string Part { get; set; }
 
+    /// <summary>How the part travels: belt/pipe, or a save-imported vehicle route.</summary>
+    public LogisticsKind Logistics { get; set; }
+
     /// <summary>Optional user-placed waypoints, in canvas coordinates.</summary>
     public List<(double X, double Y)> Waypoints { get; } = [];
 }

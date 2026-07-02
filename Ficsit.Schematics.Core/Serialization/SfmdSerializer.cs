@@ -94,15 +94,26 @@ public static class SfmdSerializer
             }
 
             var inputs = new JsonObject();
+            JsonObject? via = null; // our extension: logistics kind per vehicle-borne input
             foreach (var group in graph.IncomingTo(node).GroupBy(c => c.Part))
             {
                 var sources = new JsonArray();
                 foreach (var connection in group)
                     if (indexOf.TryGetValue(connection.From, out var index))
+                    {
                         sources.Add(index);
+                        if (connection.Logistics != LogisticsKind.None)
+                        {
+                            via ??= [];
+                            if (via[group.Key] is not JsonObject partVia)
+                                via[group.Key] = partVia = [];
+                            partVia[index.ToString()] = connection.Logistics.ToString();
+                        }
+                    }
                 if (sources.Count > 0) inputs[group.Key] = sources;
             }
             if (inputs.Count > 0) obj["Inputs"] = inputs;
+            if (via is not null) obj["InputsVia"] = via;
 
             data.Add(obj);
         }
@@ -199,6 +210,7 @@ public static class SfmdSerializer
         var local = new List<FactoryNode>();
         var pendingInputs = new List<(FactoryNode Node, string Part, List<int> Sources)>();
         var pendingParent = new List<(FactoryNode Node, int Index)>();
+        var pendingVia = new Dictionary<(FactoryNode Node, string Part, int Source), LogisticsKind>();
 
         foreach (var element in data)
         {
@@ -254,6 +266,14 @@ public static class SfmdSerializer
                         pendingInputs.Add((node, part,
                             sources.Select(s => (int)GetDouble(s, -1)).Where(i => i >= 0).ToList()));
 
+            if (obj["InputsVia"] is JsonObject viaObj)
+                foreach (var (part, mapNode) in viaObj)
+                    if (mapNode is JsonObject map)
+                        foreach (var (sourceText, kindValue) in map)
+                            if (int.TryParse(sourceText, out var source)
+                                && Enum.TryParse<LogisticsKind>(GetString(kindValue, string.Empty), out var kind))
+                                pendingVia[(node, part, source)] = kind;
+
             graph.Nodes.Add(node);
             local.Add(node);
 
@@ -266,7 +286,13 @@ public static class SfmdSerializer
         foreach (var (node, part, sources) in pendingInputs)
             foreach (var sourceIndex in sources)
                 if (sourceIndex >= 0 && sourceIndex < local.Count)
-                    graph.Connections.Add(new NodeConnection { From = local[sourceIndex], To = node, Part = part });
+                    graph.Connections.Add(new NodeConnection
+                    {
+                        From = local[sourceIndex],
+                        To = node,
+                        Part = part,
+                        Logistics = pendingVia.GetValueOrDefault((node, part, sourceIndex)),
+                    });
 
         foreach (var (node, index) in pendingParent)
             if (index >= 0 && index < local.Count)

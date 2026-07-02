@@ -71,7 +71,8 @@ public static class SaveConsolidation
             var to = representative[c.To];
             if (from == to) continue; // collapsed within one group
             if (seen.Add((from.Id, to.Id, c.Part)))
-                mergedConnections.Add(new NodeConnection { From = from, To = to, Part = c.Part });
+                mergedConnections.Add(new NodeConnection
+                    { From = from, To = to, Part = c.Part, Logistics = c.Logistics });
         }
 
         return (result, mergedConnections);

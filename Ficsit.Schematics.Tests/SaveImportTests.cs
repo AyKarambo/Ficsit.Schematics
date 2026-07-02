@@ -84,6 +84,67 @@ public class SaveImportTests
     }
 
     [Fact]
+    public void Truck_route_bridges_machines_across_stations_as_a_tagged_connection()
+    {
+        const string smelter = "L:PersistentLevel.Build_SmelterMk1_C_1";
+        const string constructor = "L:PersistentLevel.Build_ConstructorMk1_C_2";
+        const string stationA = "L:PersistentLevel.Build_TruckStation_C_3";
+        const string stationB = "L:PersistentLevel.Build_TruckStation_C_4";
+        var world = new SaveWorld
+        {
+            Buildings =
+            [
+                new SaveBuilding { ClassName = "Build_SmelterMk1_C", Instance = smelter },
+                new SaveBuilding { ClassName = "Build_ConstructorMk1_C", Instance = constructor, X = 90_000 },
+            ],
+            // The smelter belt-feeds station A; station B belt-feeds the constructor. Nothing
+            // links the stations by belt — only the truck circuit bridges them.
+            ComponentLinks = new Dictionary<string, string>
+            {
+                [smelter + ".Output0"] = stationA + ".Input0",
+                [stationB + ".Output0"] = constructor + ".Input0",
+            },
+            VehicleRoutes = [new SaveVehicleRoute(LogisticsKind.Truck, [stationA, stationB])],
+        };
+
+        var (nodes, connections) = SaveImport.Build(world, TestData.Database);
+
+        Assert.Equal(2, nodes.Count); // the stations themselves are not nodes
+        var link = Assert.Single(connections);
+        Assert.Equal("Iron Ingot", link.Part);
+        Assert.Equal(LogisticsKind.Truck, link.Logistics);
+    }
+
+    [Fact]
+    public void Belt_connections_stay_plain_when_a_route_retraces_them()
+    {
+        const string smelter = "L:PersistentLevel.Build_SmelterMk1_C_1";
+        const string constructor = "L:PersistentLevel.Build_ConstructorMk1_C_2";
+        const string stationA = "L:PersistentLevel.Build_TruckStation_C_3";
+        const string stationB = "L:PersistentLevel.Build_TruckStation_C_4";
+        var world = new SaveWorld
+        {
+            Buildings =
+            [
+                new SaveBuilding { ClassName = "Build_SmelterMk1_C", Instance = smelter },
+                new SaveBuilding { ClassName = "Build_ConstructorMk1_C", Instance = constructor, X = 100 },
+            ],
+            // A direct belt already carries the part; the truck circuit exists but adds nothing.
+            ComponentLinks = new Dictionary<string, string>
+            {
+                [smelter + ".Output0"] = constructor + ".Input0",
+                [stationB + ".Output1"] = stationA + ".Input1",
+            },
+            VehicleRoutes = [new SaveVehicleRoute(LogisticsKind.Truck, [stationA, stationB])],
+        };
+
+        var (_, connections) = SaveImport.Build(world, TestData.Database);
+
+        var link = Assert.Single(connections);
+        Assert.Equal(LogisticsKind.None, link.Logistics); // belt wins; no duplicate truck edge
+    }
+
+    [Fact]
     public void Production_recipes_correlate_to_machines_in_order()
     {
         // The k-th machine of a type takes the k-th mCurrentRecipe of that type — so a Packager

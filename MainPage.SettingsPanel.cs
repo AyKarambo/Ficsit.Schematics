@@ -172,7 +172,8 @@ public partial class MainPage
                     + $"load-balancers) are merged into {factories.Count} counted nodes and grouped into "
                     + "outposts. Add them to the current factory?\n\n"
                     + "Extractors and machines keep their real recipe, clock and Somersloops; "
-                    + "vehicle (train/truck/drone) links aren't imported yet.",
+                    + "truck and drone routes become dashed logistics links (trains aren't "
+                    + "imported yet).",
                     "Place machines", "Skip"))
             {
                 var outposts = SaveClustering.GroupByLocation(factories, _state.Data, SaveClustering.DefaultRadius);

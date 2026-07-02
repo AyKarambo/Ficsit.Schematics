@@ -73,6 +73,13 @@ public static class SatisfactorySaveReader
 
         /// <summary>Machine → Somersloops installed in its potential inventory.</summary>
         public Dictionary<string, int> Somersloops { get; } = new(StringComparer.Ordinal);
+
+        /// <summary>Truck/fluid-truck station → the road network its docking path node is on
+        /// (<c>mPathNetworkID</c>); stations sharing a network form one truck circuit.</summary>
+        public Dictionary<string, int> StationNetworks { get; } = new(StringComparer.Ordinal);
+
+        /// <summary>Drone port → its <c>mPairedStation</c> destination port.</summary>
+        public Dictionary<string, string> DronePairs { get; } = new(StringComparer.Ordinal);
     }
 
     internal static ObjectDataScan ScanObjectDataFromBody(byte[] body)
@@ -167,6 +174,17 @@ public static class SatisfactorySaveReader
                 && CountSomersloops(body, pos, dataLen) is > 0 and var sloops)
                 scan.Somersloops[instance[..^PotentialInventorySuffix.Length]] = sloops;
 
+            // A station's docking path node names its road network; the node's parent actor (the
+            // first object ref in its data) is the station itself.
+            if (instance.Contains(".Build_VehiclePathNode_DockingStation_C_", StringComparison.Ordinal)
+                && FindIntProperty(body, pos, dataLen, PathNetworkIdMarker) is { } network
+                && FindInstancePath(body, pos, pos + dataLen) is { } station)
+                scan.StationNetworks[station] = network;
+
+            if (instance.Contains(".Build_DroneStation_C_", StringComparison.Ordinal)
+                && FindPathAfterMarker(body, pos, dataLen, PairedStationMarker) is { } paired)
+                scan.DronePairs[instance] = paired;
+
             pos += dataLen;
             if (saveVer >= 53)                                        // [>=53] per-object version data
             {
@@ -180,13 +198,22 @@ public static class SatisfactorySaveReader
     /// <summary>The <c>mConnectedComponent</c> target path inside one object's data blob: the first
     /// instance-path string (contains ':') after the property name.</summary>
     private static string? FindLinkTarget(byte[] body, int start, int len)
+        => FindPathAfterMarker(body, start, len, ConnMarker);
+
+    /// <summary>The first instance path after <paramref name="marker"/> within one object's data
+    /// blob, or null when the marker isn't there.</summary>
+    private static string? FindPathAfterMarker(byte[] body, int start, int len, byte[] marker)
     {
-        var at = IndexOf(body, ConnMarker, start, start + len);
-        if (at < 0) return null;
-        var p = at + ConnMarker.Length;
-        var end = start + len;
+        var at = IndexOf(body, marker, start, start + len);
+        return at < 0 ? null : FindInstancePath(body, at + marker.Length, start + len);
+    }
+
+    /// <summary>The first instance-path string (a printable run of ≥8 chars containing ':' and
+    /// '.') in [<paramref name="from"/>, <paramref name="end"/>), or null.</summary>
+    private static string? FindInstancePath(byte[] body, int from, int end)
+    {
         var run = new System.Text.StringBuilder();
-        for (var i = p; i < end; i++)
+        for (var i = from; i < end; i++)
         {
             var b = body[i];
             if (b is >= 32 and < 127) run.Append((char)b);
@@ -200,11 +227,29 @@ public static class SatisfactorySaveReader
         return null;
     }
 
+    /// <summary>The value of the int property named by <paramref name="marker"/> inside one
+    /// object's data blob (name FString, "IntProperty" FString, size/index pair, pad byte,
+    /// value), or null when absent or framed differently.</summary>
+    private static int? FindIntProperty(byte[] body, int start, int len, byte[] marker)
+    {
+        var end = start + len;
+        var at = IndexOf(body, marker, start, end);
+        if (at < 4) return null;
+        if (BitConverter.ToInt32(body, at - 4) != marker.Length + 1) return null;    // FString length
+        if (body[at + marker.Length] != 0) return null;                              // exact name
+        var p = at + marker.Length + 1;
+        if (!IsFString(body, ref p, IntPropertyMarker, end)) return null;
+        if (p + 13 > end) return null;
+        return BitConverter.ToInt32(body, p + 9);
+    }
+
     private static readonly byte[] ClockMarker = Encoding.ASCII.GetBytes("mCurrentPotential");
     private static readonly byte[] FloatPropertyMarker = Encoding.ASCII.GetBytes("FloatProperty");
     private static readonly byte[] SloopMarker = Encoding.ASCII.GetBytes("Desc_WAT1.Desc_WAT1_C");
     private static readonly byte[] NumItemsMarker = Encoding.ASCII.GetBytes("NumItems");
     private static readonly byte[] IntPropertyMarker = Encoding.ASCII.GetBytes("IntProperty");
+    private static readonly byte[] PathNetworkIdMarker = Encoding.ASCII.GetBytes("mPathNetworkID");
+    private static readonly byte[] PairedStationMarker = Encoding.ASCII.GetBytes("mPairedStation");
 
     /// <summary>The <c>mCurrentPotential</c> float inside one object's data blob — the machine's
     /// clock as a fraction (0.4 = 40%) — or null when the property isn't there. Framing (verified
@@ -443,7 +488,28 @@ public static class SatisfactorySaveReader
             ResourceNodes = ReadResourceNodesFromBody(body),
             RecipeStems = ScanRecipeStems(body),
             ComponentLinks = scan.Links,
+            VehicleRoutes = BuildVehicleRoutes(scan),
         };
+    }
+
+    /// <summary>Vehicle circuits from the scan: truck stations grouped by road network, drone
+    /// ports by their mutual pairing.</summary>
+    private static List<SaveVehicleRoute> BuildVehicleRoutes(ObjectDataScan scan)
+    {
+        var routes = new List<SaveVehicleRoute>();
+        foreach (var network in scan.StationNetworks.GroupBy(kv => kv.Value).OrderBy(g => g.Key))
+        {
+            var stations = network.Select(kv => kv.Key).OrderBy(s => s, StringComparer.Ordinal).ToList();
+            if (stations.Count >= 2) routes.Add(new SaveVehicleRoute(Model.LogisticsKind.Truck, stations));
+        }
+        var seenPairs = new HashSet<(string, string)>();
+        foreach (var (port, paired) in scan.DronePairs)
+        {
+            var pair = string.CompareOrdinal(port, paired) <= 0 ? (port, paired) : (paired, port);
+            if (seenPairs.Add(pair))
+                routes.Add(new SaveVehicleRoute(Model.LogisticsKind.Drone, [pair.Item1, pair.Item2]));
+        }
+        return routes;
     }
 
     /// <summary>A serialized clock float as an exact fraction, rounded at the game's clock
