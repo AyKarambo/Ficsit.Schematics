@@ -176,6 +176,7 @@ public partial class MainPage
                     "Place machines", "Skip"))
             {
                 var outposts = SaveClustering.GroupByLocation(factories, _state.Data, SaveClustering.DefaultRadius);
+                SaveLayout.ArrangeOutposts(factories, connections, outposts);
                 _state.Editor.AddNodes([.. factories, .. outposts], connections);
                 placed = factories.Count;
                 outpostCount = outposts.Count;
