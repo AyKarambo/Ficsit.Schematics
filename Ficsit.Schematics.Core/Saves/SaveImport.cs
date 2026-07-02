@@ -100,7 +100,11 @@ public static class SaveImport
         var nodes = new List<FactoryNode>();
         var byInstance = new Dictionary<string, FactoryNode>(StringComparer.Ordinal);
         var usedNodes = new HashSet<string>();
-        var recipeQueues = BuildRecipeQueues(world, data);
+        var byToken = RecipeTokenIndex(data);
+        // Per-actor recipes are exact; the order-correlated queues are the whole-save fallback
+        // for bodies where the per-object scan yielded nothing (mixing the two would misalign).
+        var recipeQueues = world.Buildings.Any(b => b.RecipeStem is not null)
+            ? null : BuildRecipeQueues(world, data, byToken);
 
         foreach (var building in world.Buildings)
         {
@@ -130,11 +134,13 @@ public static class SaveImport
             }
             else
             {
-                // Take the next real recipe for this machine type (the k-th machine of a type gets
-                // the k-th mCurrentRecipe of that type), else a best-effort first recipe.
-                var recipe = recipeQueues.TryGetValue(machine, out var queue) && queue.Count > 0
-                    ? queue.Dequeue()
-                    : FirstRecipe(data, machine);
+                // The machine's own mCurrentRecipe when the scan attributed one (exact); else the
+                // k-th recipe of its type from the ordered stems; else a best-effort first recipe.
+                var recipe = ResolveRecipeStem(building.RecipeStem, byToken, data, machine)
+                    ?? (recipeQueues is not null
+                        && recipeQueues.TryGetValue(machine, out var queue) && queue.Count > 0
+                        ? queue.Dequeue()
+                        : FirstRecipe(data, machine));
                 if (recipe is not null)
                     node = new FactoryNode
                     {
@@ -192,25 +198,70 @@ public static class SaveImport
             ? data.Document.Recipes.Where(r => r.Machine == node.Name).SelectMany(r => r.Inputs).Select(p => p.Part)
             : data.RecipesByName.TryGetValue(node.Name, out var r) ? r.Inputs.Select(p => p.Part) : [];
 
-    /// <summary>Resolve the save's recipe stems to catalog recipes and group them by machine, in
-    /// order. Same serialization order as the building headers, so dequeuing per machine lines the
-    /// k-th machine of a type up with the k-th recipe of that type.</summary>
-    private static Dictionary<string, Queue<string>> BuildRecipeQueues(SaveWorld world, GameDatabase data)
+    /// <summary>Recipe stems whose internal name shares no words with the display name — the
+    /// space-elevator project parts and a few renames. Validated against the catalog (and the
+    /// machine) on use, so a wrong entry is a no-op rather than a mislabel.</summary>
+    private static readonly Dictionary<string, string> RecipeStemOverrides = new(StringComparer.OrdinalIgnoreCase)
     {
-        // Token-set index over every recipe name (e.g. "packaged|water"), unique matches only.
+        ["SpaceElevatorPart_1"] = "Smart Plating",
+        ["SpaceElevatorPart_2"] = "Versatile Framework",
+        ["SpaceElevatorPart_3"] = "Automated Wiring",
+        ["SpaceElevatorPart_4"] = "Modular Engine",
+        ["SpaceElevatorPart_5"] = "Adaptive Control Unit",
+        ["SpaceElevatorPart_6"] = "Magnetic Field Generator",
+        ["SpaceElevatorPart_7"] = "Assembly Director System",
+        ["SpaceElevatorPart_8"] = "Thermal Propulsion Rocket",
+        ["SpaceElevatorPart_9"] = "Nuclear Pasta",
+        ["SpaceElevatorPart_10"] = "Biochemical Sculptor",
+        ["SpaceElevatorPart_11"] = "Ballistic Warp Drive",
+        ["SpaceElevatorPart_12"] = "AI Expansion Server",
+        ["Biofuel"] = "Solid Biofuel",
+    };
+
+    /// <summary>The catalog recipe name a save stem points at, or null: the recipe-stem override
+    /// table, then (for alternates) the divergent-schematic-name table, then the shared token
+    /// match. No catalog validation here — callers check existence and machine.</summary>
+    private static string? StemToRecipeName(string stem, Dictionary<string, string?> byToken)
+    {
+        var isAlternate = stem.StartsWith("Alternate_", StringComparison.Ordinal);
+        var bare = isAlternate ? stem["Alternate_".Length..] : stem;
+        return RecipeStemOverrides.GetValueOrDefault(stem)
+            ?? (isAlternate ? SchematicRecipeMap.OverrideFor(bare) : null)
+            ?? byToken.GetValueOrDefault(SchematicRecipeMap.TokenKey(bare));
+    }
+
+    /// <summary>Token-set index over every recipe name (e.g. "packaged|water"), unique matches
+    /// only — how a save recipe stem finds its catalog recipe.</summary>
+    private static Dictionary<string, string?> RecipeTokenIndex(GameDatabase data)
+    {
         var byToken = new Dictionary<string, string?>();
         foreach (var recipe in data.Document.Recipes)
         {
             var key = SchematicRecipeMap.TokenKey(recipe.Name);
             byToken[key] = byToken.ContainsKey(key) ? null : recipe.Name;
         }
+        return byToken;
+    }
 
+    /// <summary>The catalog recipe a save stem names, when it exists and belongs to
+    /// <paramref name="machine"/> (a stem resolving to another machine's recipe is a misparse).</summary>
+    private static string? ResolveRecipeStem(
+        string? stem, Dictionary<string, string?> byToken, GameDatabase data, string machine)
+    {
+        if (stem is null || StemToRecipeName(stem, byToken) is not { } name) return null;
+        return data.RecipesByName.TryGetValue(name, out var def) && def.Machine == machine ? name : null;
+    }
+
+    /// <summary>Resolve the save's recipe stems to catalog recipes and group them by machine, in
+    /// order. Same serialization order as the building headers, so dequeuing per machine lines the
+    /// k-th machine of a type up with the k-th recipe of that type.</summary>
+    private static Dictionary<string, Queue<string>> BuildRecipeQueues(
+        SaveWorld world, GameDatabase data, Dictionary<string, string?> byToken)
+    {
         var queues = new Dictionary<string, Queue<string>>();
         foreach (var stem in world.RecipeStems)
         {
-            var bare = stem.StartsWith("Alternate_", StringComparison.Ordinal)
-                ? stem["Alternate_".Length..] : stem;
-            if (byToken.GetValueOrDefault(SchematicRecipeMap.TokenKey(bare)) is not { } name) continue;
+            if (StemToRecipeName(stem, byToken) is not { } name) continue;
             if (!data.RecipesByName.TryGetValue(name, out var def)) continue;
             if (!queues.TryGetValue(def.Machine, out var queue)) queues[def.Machine] = queue = new();
             queue.Enqueue(name);

@@ -48,6 +48,36 @@ public class SaveConnectionTracerTests
     }
 
     [Fact]
+    public void A_directionless_pipe_port_starts_a_trace()
+    {
+        // A water pump's only fluid port is ".FGPipeConnectionFactory" — no Input/Output in the
+        // name — feeding a refinery's named PipeInput through a pipeline.
+        var links = new Dictionary<string, string>();
+        Wire(links, $"{P}Build_WaterPump_C_1.FGPipeConnectionFactory", $"{P}Build_Pipeline_C_2.PipelineConnection0");
+        Wire(links, $"{P}Build_Pipeline_C_2.PipelineConnection1", $"{P}Build_OilRefinery_C_3.PipeInputFactory");
+
+        var edges = SaveConnectionTracer.MachineEdges(links, SaveImport.IsModelledMachine);
+
+        Assert.Contains(($"{P}Build_WaterPump_C_1", $"{P}Build_OilRefinery_C_3"), edges);
+    }
+
+    [Fact]
+    public void A_directionless_pipe_port_ends_a_trace()
+    {
+        // A fuel generator's fluid intake is also ".FGPipeConnectionFactory": a refinery's
+        // PipeOutput must reach it through the pipeline.
+        var links = new Dictionary<string, string>();
+        Wire(links, $"{P}Build_OilRefinery_C_1.PipeOutputFactory", $"{P}Build_Pipeline_C_2.PipelineConnection0");
+        Wire(links, $"{P}Build_Pipeline_C_2.PipelineConnection1", $"{P}Build_GeneratorFuel_C_3.FGPipeConnectionFactory");
+
+        var edges = SaveConnectionTracer.MachineEdges(links, SaveImport.IsModelledMachine);
+
+        Assert.Contains(($"{P}Build_OilRefinery_C_1", $"{P}Build_GeneratorFuel_C_3"), edges);
+        // The reverse direction is traced too (the port has no direction); the recipe-compat
+        // materialization is what discards it — the tracer just reports reachability.
+    }
+
+    [Fact]
     public void Does_not_trace_through_a_real_machine()
     {
         // Miner → Smelter → Constructor: a Smelter is a terminal, so the miner does NOT connect

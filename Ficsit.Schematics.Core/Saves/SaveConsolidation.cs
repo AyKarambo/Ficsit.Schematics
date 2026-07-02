@@ -7,6 +7,8 @@ namespace Ficsit.Schematics.Core.Saves;
 /// are wired to the same set of upstream and downstream machines are a manifold / load-balanced
 /// group (10 constructors all fed from the same source and feeding the same sink) — the user wants
 /// those shown as a single "Constructor ×10" node, regardless of the belt topology between them.
+/// Machines with no wiring at all (manual-fed banks, power-only machines) merge per adjacent row:
+/// same identity within <see cref="AdjacentRadius"/>, never across the map.
 /// Pure: takes the imported nodes + connections and returns the consolidated graph.
 /// </summary>
 public static class SaveConsolidation
@@ -40,27 +42,25 @@ public static class SaveConsolidation
         {
             var members = group.ToList();
             var first = members[0];
-            var isolated = sources[first].Count == 0 && sinks[first].Count == 0;
-            if (members.Count == 1 || isolated || first.ResourceNodeId is not null)
+            if (members.Count == 1 || first.ResourceNodeId is not null)
             {
                 foreach (var n in members) { representative[n] = n; result.Add(n); }
                 continue;
             }
 
-            var merged = new FactoryNode
+            if (sources[first].Count == 0 && sinks[first].Count == 0)
             {
-                Name = first.Name,
-                Kind = first.Kind,
-                MachineVariant = first.MachineVariant,
-                Capacity = first.Capacity,
-                ClockSpeed = first.ClockSpeed,
-                Somersloops = first.Somersloops,
-                X = members.Average(n => n.X),
-                Y = members.Average(n => n.Y),
-                Max = members.Count.ToString(), // N physical machines of this recipe
-            };
-            foreach (var n in members) representative[n] = merged;
-            result.Add(merged);
+                // No wiring at all (manual-fed banks, power-only machines): merge per
+                // side-by-side row — same identity within arm's reach — never across the map.
+                foreach (var cluster in ProximityClusters(members, AdjacentRadius))
+                {
+                    if (cluster.Count == 1) { representative[cluster[0]] = cluster[0]; result.Add(cluster[0]); }
+                    else result.Add(Merge(cluster, representative));
+                }
+                continue;
+            }
+
+            result.Add(Merge(members, representative));
         }
 
         var mergedConnections = new List<NodeConnection>();
@@ -76,5 +76,57 @@ public static class SaveConsolidation
         }
 
         return (result, mergedConnections);
+    }
+
+    /// <summary>Isolated machines merge only within this distance (canvas metres): a machine row
+    /// is ~10 m spacing, a genuinely separate site is hundreds.</summary>
+    private const double AdjacentRadius = 40;
+
+    private static FactoryNode Merge(List<FactoryNode> members, Dictionary<FactoryNode, FactoryNode> representative)
+    {
+        var first = members[0];
+        var merged = new FactoryNode
+        {
+            Name = first.Name,
+            Kind = first.Kind,
+            MachineVariant = first.MachineVariant,
+            Capacity = first.Capacity,
+            ClockSpeed = first.ClockSpeed,
+            Somersloops = first.Somersloops,
+            X = members.Average(n => n.X),
+            Y = members.Average(n => n.Y),
+            Max = members.Count.ToString(), // N physical machines of this recipe
+        };
+        foreach (var n in members) representative[n] = merged;
+        return merged;
+    }
+
+    /// <summary>Connected components of the proximity graph (chained: a row of machines each
+    /// ~10 m apart is one cluster). Groups are small, so the O(n²) union-find is fine.</summary>
+    private static List<List<FactoryNode>> ProximityClusters(List<FactoryNode> nodes, double radius)
+    {
+        var parent = Enumerable.Range(0, nodes.Count).ToArray();
+        int Find(int i) { while (parent[i] != i) i = parent[i] = parent[parent[i]]; return i; }
+
+        var r2 = radius * radius;
+        for (var i = 0; i < nodes.Count; i++)
+            for (var j = i + 1; j < nodes.Count; j++)
+            {
+                var dx = nodes[i].X - nodes[j].X;
+                var dy = nodes[i].Y - nodes[j].Y;
+                if (dx * dx + dy * dy > r2) continue;
+                var ri = Find(i);
+                var rj = Find(j);
+                if (ri != rj) parent[ri] = rj;
+            }
+
+        var byRoot = new Dictionary<int, List<FactoryNode>>();
+        for (var i = 0; i < nodes.Count; i++)
+        {
+            var root = Find(i);
+            if (!byRoot.TryGetValue(root, out var list)) byRoot[root] = list = [];
+            list.Add(nodes[i]);
+        }
+        return byRoot.Values.ToList();
     }
 }

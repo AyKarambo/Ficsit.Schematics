@@ -27,4 +27,10 @@ public sealed class SaveBuilding
 
     /// <summary>Somersloops installed (counted from the machine's potential-inventory items).</summary>
     public int Somersloops { get; set; }
+
+    /// <summary>This machine's <c>mCurrentRecipe</c> stem ("IronPlate", "Alternate_BoltedFrame"),
+    /// attributed per actor; null when the machine has no recipe set (or the save predates the
+    /// per-object scan, in which case <see cref="SaveWorld.RecipeStems"/> order-correlation is
+    /// the fallback).</summary>
+    public string? RecipeStem { get; set; }
 }

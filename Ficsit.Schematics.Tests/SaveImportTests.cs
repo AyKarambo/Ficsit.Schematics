@@ -145,6 +145,49 @@ public class SaveImportTests
     }
 
     [Fact]
+    public void A_per_actor_recipe_stem_beats_the_order_correlation()
+    {
+        // When the scan attributed mCurrentRecipe to the actor itself, that wins outright —
+        // even when the ordered stems would say otherwise.
+        var world = new SaveWorld
+        {
+            Buildings =
+            [
+                new SaveBuilding { ClassName = "Build_ConstructorMk1_C", RecipeStem = "Cable" },
+                new SaveBuilding { ClassName = "Build_ConstructorMk1_C", X = 100, RecipeStem = "Wire" },
+            ],
+            RecipeStems = ["Wire", "Cable"], // opposite order — must be ignored
+        };
+
+        var nodes = SaveImport.BuildNodes(world, TestData.Database);
+
+        Assert.Equal(2, nodes.Count);
+        Assert.Equal("Cable", nodes[0].Name);
+        Assert.Equal("Wire", nodes[1].Name);
+    }
+
+    [Fact]
+    public void A_machine_without_its_own_recipe_falls_back_to_first_recipe_not_the_queue()
+    {
+        // With per-actor recipes present, an unconfigured machine must NOT steal a stem from
+        // the ordered list (that would shift someone else's recipe onto it).
+        var world = new SaveWorld
+        {
+            Buildings =
+            [
+                new SaveBuilding { ClassName = "Build_ConstructorMk1_C", RecipeStem = "Cable" },
+                new SaveBuilding { ClassName = "Build_ConstructorMk1_C", X = 100 }, // no recipe set
+            ],
+            RecipeStems = ["Cable"],
+        };
+
+        var nodes = SaveImport.BuildNodes(world, TestData.Database);
+
+        Assert.Equal("Cable", nodes[0].Name);
+        Assert.NotEqual("Cable", nodes[1].Name); // best-effort default, not a stolen stem
+    }
+
+    [Fact]
     public void Production_recipes_correlate_to_machines_in_order()
     {
         // The k-th machine of a type takes the k-th mCurrentRecipe of that type — so a Packager

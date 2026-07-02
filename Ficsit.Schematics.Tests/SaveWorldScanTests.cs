@@ -25,10 +25,12 @@ public class SaveWorldScanTests
         var constructor = Assert.Single(world.Buildings, b => b.ClassName == "Build_ConstructorMk1_C");
         Assert.Equal(new Rational(1, 2), constructor.ClockSpeed);
         Assert.Equal(3, constructor.Somersloops); // 2 + 1; the vacated 0-item stack adds nothing
+        Assert.Equal("IronPlate", constructor.RecipeStem); // its own mCurrentRecipe, per actor
 
         var smelter = Assert.Single(world.Buildings, b => b.ClassName == "Build_SmelterMk1_C");
         Assert.Equal(Rational.One, smelter.ClockSpeed); // the 100% default isn't serialized
         Assert.Equal(0, smelter.Somersloops);
+        Assert.Null(smelter.RecipeStem); // no recipe set
 
         Assert.Equal(Smelter + ".Input0", world.ComponentLinks[Constructor + ".Output0"]);
     }
@@ -86,7 +88,8 @@ public class SaveWorldScanTests
     private static byte[] BuildBody(float clock) => AssembleBody(
         (w => WriteActorToc(w,
             "/Game/FactoryGame/Buildable/Factory/ConstructorMk1/Build_ConstructorMk1.Build_ConstructorMk1_C",
-            Constructor), FloatProperty("mCurrentPotential", clock)),
+            Constructor),
+            [.. FloatProperty("mCurrentPotential", clock), .. RecipeProperty("IronPlate")]),
         (w => WriteObjectToc(w, "/Script/FactoryGame.FGInventoryComponent",
             Constructor + ".InventoryPotential", Constructor),
             [.. SloopStack(2), .. SloopStack(1), .. SloopStack(0)]),
@@ -186,6 +189,20 @@ public class SaveWorldScanTests
         WriteFString(w, "FloatProperty");
         w.Write(0); w.Write(4); w.Write((byte)0);
         w.Write(value);
+        w.Flush();
+        return ms.ToArray();
+    }
+
+    /// <summary>An mCurrentRecipe ObjectProperty pointing at the recipe asset.</summary>
+    private static byte[] RecipeProperty(string stem)
+    {
+        using var ms = new MemoryStream();
+        using var w = new BinaryWriter(ms);
+        WriteFString(w, "mCurrentRecipe");
+        WriteFString(w, "ObjectProperty");
+        w.Write(0); w.Write(90); w.Write((byte)0);
+        WriteFString(w, "Persistent_Level");
+        WriteFString(w, $"/Game/FactoryGame/Recipes/Constructor/Recipe_{stem}.Recipe_{stem}_C");
         w.Flush();
         return ms.ToArray();
     }

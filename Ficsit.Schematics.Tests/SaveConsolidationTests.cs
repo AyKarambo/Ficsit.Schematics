@@ -51,11 +51,27 @@ public class SaveConsolidationTests
     }
 
     [Fact]
-    public void Isolated_machines_are_left_individual()
+    public void Adjacent_isolated_machines_merge_into_a_counted_row()
     {
-        // Two same-recipe machines with no connections (e.g. vehicle-fed) must stay separate.
+        // A bank of unwired same-recipe machines side by side (manual-fed, power-only) is one
+        // "×N" node — the "many machines side by side doing the same" case. Chained spacing
+        // (each ~10 m from the next) still counts as one row.
         var a = N("Iron Plate");
-        var b = N("Iron Plate");
+        var b = N("Iron Plate"); b.X = 10;
+        var c = N("Iron Plate"); c.X = 20;
+
+        var (cNodes, _) = SaveConsolidation.Consolidate(new[] { a, b, c }, []);
+
+        var merged = Assert.Single(cNodes);
+        Assert.Equal("3", merged.Max);
+    }
+
+    [Fact]
+    public void Distant_isolated_machines_stay_separate()
+    {
+        // The same recipe at two far-apart sites is two nodes, not one imaginary manifold.
+        var a = N("Iron Plate");
+        var b = N("Iron Plate"); b.X = 5000;
 
         var (cNodes, _) = SaveConsolidation.Consolidate(new[] { a, b }, []);
 

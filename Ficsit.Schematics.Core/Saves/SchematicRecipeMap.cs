@@ -141,9 +141,16 @@ public static class SchematicRecipeMap
         return (unlocked, unrecognized);
     }
 
-    /// <summary>Sorted, lowercased word tokens (split on non-alphanumerics, camelCase, and
-    /// letter↔digit boundaries) joined into a canonical key — order-insensitive. Public so the
-    /// save-import recipe matcher can share the exact tokenisation.</summary>
+    /// <summary>The override name for a stem the token matcher can't resolve, or null. Shared by
+    /// the schematic matcher and the per-machine recipe import — but only for <b>alternate</b>
+    /// stems: the table's keys are internal alternate names, and some ("Screw", "Rotor") collide
+    /// with standard-recipe stems that must not be rewritten.</summary>
+    public static string? OverrideFor(string alternateStem) => Overrides.GetValueOrDefault(alternateStem);
+
+    /// <summary>Sorted, lowercased word tokens (split on non-alphanumerics, camelCase — with
+    /// acronym handling, "AILimiter" → "ai|limiter" — and letter↔digit boundaries) joined into a
+    /// canonical key — order-insensitive. Public so the save-import recipe matcher can share the
+    /// exact tokenisation.</summary>
     public static string TokenKey(string text)
     {
         var tokens = new List<string>();
@@ -160,7 +167,17 @@ public static class SchematicRecipeMap
             if (!char.IsLetterOrDigit(c)) { Flush(); prev = c; continue; }
             if (sb.Length > 0 &&
                 ((char.IsUpper(c) && char.IsLower(prev)) || (char.IsDigit(c) != char.IsDigit(prev))))
+            {
                 Flush();
+            }
+            else if (sb.Length >= 2 && char.IsLower(c) && char.IsUpper(prev))
+            {
+                // Acronym → word boundary: in "AILimiter" the last upper starts the new word.
+                var wordStart = sb[^1];
+                sb.Length--;
+                Flush();
+                sb.Append(wordStart);
+            }
             sb.Append(c);
             prev = c;
         }

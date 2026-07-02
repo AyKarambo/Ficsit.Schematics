@@ -38,7 +38,10 @@ public static class SaveConnectionTracer
         var edges = new HashSet<(string, string)>();
         foreach (var start in adj.Keys.ToList())
         {
-            if (!IsOutput(start)) continue;
+            // Belt ports say which way they face; a machine's fluid port (FGPipeConnection…)
+            // doesn't, so it can start or end a trace — the recipe-compatibility check on
+            // materialization keeps only the direction that makes sense.
+            if (!IsOutput(start) && !IsPipePort(start)) continue;
             var source = MachineOf(start);
             if (!isRealMachine(ClassOf(source))) continue;
 
@@ -51,7 +54,8 @@ public static class SaveConnectionTracer
                 var machine = MachineOf(node);
                 if (isRealMachine(ClassOf(machine)))
                 {
-                    if (machine != source && IsInput(node)) edges.Add((source, machine));
+                    if (machine != source && (IsInput(node) || IsPipePort(node)))
+                        edges.Add((source, machine));
                     continue; // real machines are terminals — never traverse through them
                 }
                 foreach (var next in adj[node]) if (seen.Add(next)) queue.Enqueue(next);
@@ -79,4 +83,10 @@ public static class SaveConnectionTracer
 
     private static bool IsOutput(string component) => component.Contains("Output", StringComparison.Ordinal);
     private static bool IsInput(string component) => component.Contains("Input", StringComparison.Ordinal);
+
+    /// <summary>A machine fluid port with no direction in its name — the auto-created
+    /// <c>FGPipeConnectionFactory</c> component on water/oil pumps and generators. (Refineries
+    /// and packagers name theirs PipeInput/PipeOutput, so they take the belt rules.)</summary>
+    private static bool IsPipePort(string component)
+        => component.Contains("FGPipeConnection", StringComparison.Ordinal);
 }

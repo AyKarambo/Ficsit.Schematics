@@ -74,6 +74,10 @@ public static class SatisfactorySaveReader
         /// <summary>Machine → Somersloops installed in its potential inventory.</summary>
         public Dictionary<string, int> Somersloops { get; } = new(StringComparer.Ordinal);
 
+        /// <summary>Machine → its <c>mCurrentRecipe</c> stem ("IronPlate", "Alternate_BoltedFrame").
+        /// Exact per-actor attribution — no order correlation needed.</summary>
+        public Dictionary<string, string> Recipes { get; } = new(StringComparer.Ordinal);
+
         /// <summary>Truck/fluid-truck station → the road network its docking path node is on
         /// (<c>mPathNetworkID</c>); stations sharing a network form one truck circuit.</summary>
         public Dictionary<string, int> StationNetworks { get; } = new(StringComparer.Ordinal);
@@ -170,6 +174,7 @@ public static class SatisfactorySaveReader
             var instance = instances[i];
             if (FindLinkTarget(body, pos, dataLen) is { } target) scan.Links[instance] = target;
             if (FindClockValue(body, pos, dataLen) is { } clock) scan.Clocks[instance] = clock;
+            if (FindRecipeStem(body, pos, dataLen) is { } recipe) scan.Recipes[instance] = recipe;
             if (instance.EndsWith(PotentialInventorySuffix, StringComparison.Ordinal)
                 && CountSomersloops(body, pos, dataLen) is > 0 and var sloops)
                 scan.Somersloops[instance[..^PotentialInventorySuffix.Length]] = sloops;
@@ -250,6 +255,20 @@ public static class SatisfactorySaveReader
     private static readonly byte[] IntPropertyMarker = Encoding.ASCII.GetBytes("IntProperty");
     private static readonly byte[] PathNetworkIdMarker = Encoding.ASCII.GetBytes("mPathNetworkID");
     private static readonly byte[] PairedStationMarker = Encoding.ASCII.GetBytes("mPairedStation");
+    private static readonly byte[] CurrentRecipeMarker = Encoding.ASCII.GetBytes("mCurrentRecipe");
+
+    /// <summary>The machine's <c>mCurrentRecipe</c> stem inside one object's data blob, or null.
+    /// Same asset-path extraction the whole-body <see cref="ScanRecipeStems"/> uses, but attributed
+    /// to its owner exactly rather than correlated by order.</summary>
+    private static string? FindRecipeStem(byte[] body, int start, int len)
+    {
+        var at = IndexOf(body, CurrentRecipeMarker, start, start + len);
+        if (at < 4) return null;
+        if (BitConverter.ToInt32(body, at - 4) != CurrentRecipeMarker.Length + 1) return null;
+        if (body[at + CurrentRecipeMarker.Length] != 0) return null;
+        var from = at + CurrentRecipeMarker.Length;
+        return RecipeStemAfter(body, from, Math.Min(320, start + len - from));
+    }
 
     /// <summary>The <c>mCurrentPotential</c> float inside one object's data blob — the machine's
     /// clock as a fraction (0.4 = 40%) — or null when the property isn't there. Framing (verified
@@ -481,6 +500,8 @@ public static class SatisfactorySaveReader
                 building.ClockSpeed = ToClockFraction(clock);
             if (scan.Somersloops.TryGetValue(building.Instance, out var sloops))
                 building.Somersloops = sloops;
+            if (scan.Recipes.TryGetValue(building.Instance, out var recipe))
+                building.RecipeStem = recipe;
         }
         return new SaveWorld
         {
