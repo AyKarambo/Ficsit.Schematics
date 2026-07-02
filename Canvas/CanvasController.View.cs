@@ -63,14 +63,23 @@ public sealed partial class CanvasController
     /// Tidy the selected nodes into dependency layers in place (anchored at the
     /// selection's top-left), as one undoable move. Right-click "Format selection".
     /// </summary>
-    public void FormatSelection()
+    public void FormatSelection() => FormatNodes(state.Selection.ToList());
+
+    /// <summary>
+    /// Tidy <paramref name="nodes"/> into dependency layers in place (anchored at the group's
+    /// top-left), as one undoable move. A no-op when they already sit at their layout, so
+    /// forcing it (outpost interiors format on every entry) doesn't pollute the undo stack.
+    /// </summary>
+    public void FormatNodes(IReadOnlyList<FactoryNode> nodes)
     {
-        var nodes = state.Selection.ToList();
         if (nodes.Count < 2) return;
 
         var originX = nodes.Min(n => n.X);
         var originY = nodes.Min(n => n.Y);
         var targets = FactoryAutoLayout.Arrange(nodes, state.Editor.Graph, originX, originY);
+        if (nodes.All(n => !targets.TryGetValue(n, out var pos)
+                || (Math.Abs(pos.X - n.X) < 0.01 && Math.Abs(pos.Y - n.Y) < 0.01)))
+            return; // already formatted
 
         // One undo step; suspended so the grouped moves don't each re-solve.
         using (state.Editor.SuspendSolve())

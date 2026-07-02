@@ -312,6 +312,9 @@ public partial class MainPage : ContentPage
         if (editor.ScopePath.Count > 0)
         {
             var outpost = editor.ScopePath[^1];
+            // An outpost interior is always presented tidy: force the dependency layout over
+            // the members on entry (a no-op when nothing moved since the last format).
+            _controller.FormatNodes(editor.VisibleNodes.ToList());
             // Members carry their real world positions; on first entry the outpost has no saved
             // inner view (default pan/zoom = origin), which would leave imported members off-screen
             // — so frame them. Once visited, the saved inner view is restored.
