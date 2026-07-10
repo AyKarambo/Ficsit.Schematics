@@ -100,8 +100,11 @@ public static class SatisfactorySaveReader
     /// Locate the persistent level's TOC and Data blob contents. Both are int64-length-prefixed
     /// (so the high dword of a real, sub-4 GB length is 0 — binary noise rarely is) and both begin
     /// with the same large <c>int32 numObjects</c>; that match, plus building instances in the TOC,
-    /// pins the pair down without parsing the version-sensitive grid/streaming-level preamble. The
-    /// persistent level has the most objects, so the highest-count match wins.
+    /// narrows the field without parsing the version-sensitive grid/streaming-level preamble. The
+    /// framing checks alone are not enough on large saves — a 107 MB body can contain junk
+    /// length-pairs whose fake spans even include the building marker — so every candidate must
+    /// prove itself by <see cref="TocWalks">actually walking</see>: all of its object headers must
+    /// parse. Among the survivors the highest object count wins (the persistent level has the most).
     /// </summary>
     private static (int TocStart, long TocLen, int DataStart, long DataLen)? FindPersistentLevelBlobs(byte[] body)
     {
@@ -120,13 +123,51 @@ public static class SatisfactorySaveReader
             var dataLen = BitConverter.ToInt64(body, dataPos);
             if (dataLen < 4 || dataPos + 8 + dataLen > body.Length) continue;
             if (BitConverter.ToInt32(body, dataPos + 8) != n1) continue;    // TOC/Data numObjects match
-            if (n1 > bestCount && IndexOf(body, marker, p + 8, p + 8 + (int)tocLen) >= 0)
+            if (n1 > bestCount
+                && TocWalks(body, p + 8, tocLen, n1)
+                && IndexOf(body, marker, p + 8, p + 8 + (int)tocLen) >= 0)
             {
                 best = (p + 8, tocLen, dataPos + 8, dataLen);
                 bestCount = n1;
             }
         }
         return best;
+    }
+
+    /// <summary>True when the TOC blob at <paramref name="tocStart"/> really is a level TOC: all
+    /// <paramref name="count"/> object headers parse without running past its length (a small
+    /// trailing tail after the last header is normal). Junk length-pairs that satisfy the cheap
+    /// framing checks fail within their first header, so the walk is what tells the real
+    /// persistent level from binary noise.</summary>
+    private static bool TocWalks(byte[] body, int tocStart, long tocLen, int count)
+    {
+        var end = (int)Math.Min(tocStart + tocLen, body.Length);
+        var pos = tocStart + 4; // past numObjects
+        for (var i = 0; i < count; i++)
+        {
+            if (pos + 4 > end) return false;
+            var isActor = BitConverter.ToInt32(body, pos); pos += 4;
+            if (isActor is not (0 or 1)) return false;
+            if (!SkipFString(body, ref pos, end)) return false;             // className
+            if (!SkipFString(body, ref pos, end)) return false;             // levelName
+            if (!SkipFString(body, ref pos, end)) return false;             // pathName
+            pos += 4;                                                       // ObjectFlags
+            if (isActor == 1) pos += 4 + 16 + 12 + 12 + 4;                  // transform block
+            else if (!SkipFString(body, ref pos, end)) return false;        // OuterPathName
+        }
+        return pos <= end;
+    }
+
+    /// <summary>Skip one FString (ASCII or UTF-16 framing) staying inside [.., <paramref name="end"/>).</summary>
+    private static bool SkipFString(byte[] body, ref int pos, int end)
+    {
+        if (pos + 4 > end) return false;
+        var len = BitConverter.ToInt32(body, pos); pos += 4;
+        if (len == 0) return true;
+        var bytes = len > 0 ? len : -(long)len * 2;
+        if (bytes > 1 << 20 || pos + bytes > end) return false;
+        pos += (int)bytes;
+        return true;
     }
 
     /// <summary>Walk the TOC blob's object headers in order, returning each object's instance path.
