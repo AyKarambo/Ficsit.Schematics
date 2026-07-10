@@ -324,6 +324,13 @@ public static class SfmdSerializer
                 node.Parent = local[index];
     }
 
+    /// <summary>The unified generator machine a per-fuel recipe name maps to, or null.
+    /// Shared with <see cref="Editing.FactoryEditor"/> so freshly added nodes (Auto-Plan
+    /// materializes planner rows by recipe name) are created as the very node this
+    /// load-time migration would otherwise rewrite them into.</summary>
+    public static string? GeneratorMachineFor(string recipeName)
+        => GeneratorMachineByRecipe.Value.GetValueOrDefault(recipeName);
+
     public static NodeKind KindFor(string name) => name switch
     {
         "Outpost" => NodeKind.Outpost,

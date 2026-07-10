@@ -413,6 +413,28 @@ public class SolverTests
     }
 
     [Fact]
+    public void Generator_with_only_water_wired_runs_the_matching_fuel_recipe()
+    {
+        // Auto-Plan with the fuel provisioned wires only the in-plan water: the generator
+        // must keep running the matching recipe (first in catalog order with any wired
+        // input), consuming the water and surfacing the coal as unmade demand — not go
+        // dead at rated power with a dangling water connection.
+        var doc = new FactoryDocument();
+        var water = Node(doc, "Storage Container");
+        water.StorageMode = StorageMode.Full;
+        var gen = Generator(doc, "Coal-Powered Generator", "2");
+        Connect(doc, water, "Water", gen);
+
+        var result = Solve(doc);
+        Assert.Equal(new Rational(2), result.For(gen).Count);
+        Assert.Equal(new Rational(150), result.For(gen).Power); // 2 × 75 MW
+        Assert.Equal(new Rational(90), result.For(gen).Inputs["Water"].Target); // 2 × 45
+        var coal = result.For(gen).Inputs["Coal"];
+        Assert.Equal(new Rational(30), coal.Target); // 2 × 15, unwired → unmade demand
+        Assert.False(coal.HasConnections);
+    }
+
+    [Fact]
     public void Power_is_negative_for_consumers()
     {
         var doc = new FactoryDocument();

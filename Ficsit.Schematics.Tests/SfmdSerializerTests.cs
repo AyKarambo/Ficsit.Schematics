@@ -1,4 +1,5 @@
 using System.Text.Json.Nodes;
+using Ficsit.Schematics.Core.Editing;
 using Ficsit.Schematics.Core.Model;
 using Ficsit.Schematics.Core.Numerics;
 using Ficsit.Schematics.Core.Serialization;
@@ -271,6 +272,39 @@ public class SfmdSerializerTests
         var connection = Assert.Single(reloaded.Root.Connections);
         Assert.Equal("Turbofuel", connection.Part);
         Assert.Equal("Fuel-Powered Generator", connection.To.Name);
+    }
+
+    [Fact]
+    public void Auto_plan_created_per_fuel_generator_round_trips_with_identical_flows()
+    {
+        // Auto-Plan (MainPage.AutoPlan BuildPlanOnCanvas) materializes planner rows via
+        // editor.AddNode(recipeName) — including per-fuel generator recipes. A power plan
+        // with Coal provisioned wires only the in-plan Water to the generator; the current
+        // document round-trips through this serializer on every app restart (FicsitStore)
+        // and on copy/paste, so the solved flows must survive Serialize → Deserialize.
+        var editor = new FactoryEditor(TestData.Database);
+        var water = editor.AddNode("Storage Container", 0, 0);
+        water.StorageMode = StorageMode.Full; // stands in for the plan's water extractors
+        var gen = editor.AddNode("Coal Generator", 100, 0);
+        editor.SetLimit(gen, "4");
+        editor.Connect(water, "Water", gen);
+
+        var solver = new BasicSolver(TestData.Database);
+        var before = solver.Solve(editor.Document);
+        // Coal Generator: In Coal 1, In Water 3, Batch 4 → 15 coal + 45 water /min each.
+        Assert.Equal(new Rational(60), before.For(gen).Inputs["Coal"].Target);
+        Assert.Equal(new Rational(180), before.For(gen).Inputs["Water"].Target);
+        Assert.Equal(new Rational(300), before.For(gen).Power); // 4 × 75 MW
+
+        var reloaded = SfmdSerializer.Deserialize(SfmdSerializer.Serialize(editor.Document));
+        var reloadedGen = reloaded.Root.Nodes.Single(n => n.X == 100);
+        Assert.Equal(gen.Name, reloadedGen.Name);
+        Assert.Equal(gen.Kind, reloadedGen.Kind);
+
+        var after = solver.Solve(reloaded);
+        Assert.Equal(new Rational(60), after.For(reloadedGen).Inputs["Coal"].Target);
+        Assert.Equal(new Rational(180), after.For(reloadedGen).Inputs["Water"].Target);
+        Assert.Equal(new Rational(300), after.For(reloadedGen).Power);
     }
 
     [Fact]

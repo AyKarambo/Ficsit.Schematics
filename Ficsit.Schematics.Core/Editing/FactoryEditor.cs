@@ -129,6 +129,17 @@ public sealed class FactoryEditor
     public FactoryNode AddNode(string name, double x, double y)
     {
         var kind = SfmdSerializer.KindFor(name);
+
+        // A per-fuel generator recipe name ("Coal Generator", …) places the unified
+        // generator directly — the same node the serializer's legacy migration and the
+        // save importer produce — so documents built by Auto-Plan (which materializes
+        // planner rows by recipe name) round-trip persistence and copy/paste unchanged.
+        if (kind == NodeKind.Recipe && SfmdSerializer.GeneratorMachineFor(name) is { } generatorMachine)
+        {
+            name = generatorMachine;
+            kind = NodeKind.Generator;
+        }
+
         var node = new FactoryNode { Name = name, Kind = kind, X = x, Y = y, Parent = ActiveOutpost };
 
         if (kind == NodeKind.Recipe
