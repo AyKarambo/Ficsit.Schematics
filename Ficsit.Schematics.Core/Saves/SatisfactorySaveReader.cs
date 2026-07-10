@@ -84,6 +84,17 @@ public static class SatisfactorySaveReader
 
         /// <summary>Drone port → its <c>mPairedStation</c> destination port.</summary>
         public Dictionary<string, string> DronePairs { get; } = new(StringComparer.Ordinal);
+
+        /// <summary>Train timetable → the <c>FGTrainStationIdentifier</c> instances of its
+        /// <c>mStops</c>, in stop order (repeat visits repeat the identifier).</summary>
+        public Dictionary<string, List<string>> TimetableStops { get; } = new(StringComparer.Ordinal);
+
+        /// <summary>Station identifier → its <c>mStation</c> actor (<c>Build_TrainStation_C</c>).</summary>
+        public Dictionary<string, string> StationOfIdentifier { get; } = new(StringComparer.Ordinal);
+
+        /// <summary>Platform connection component → the neighboring platform's connection
+        /// component (<c>mConnectedTo</c>); the chain that hangs freight platforms off a station.</summary>
+        public Dictionary<string, string> PlatformLinks { get; } = new(StringComparer.Ordinal);
     }
 
     internal static ObjectDataScan ScanObjectDataFromBody(byte[] body)
@@ -231,6 +242,21 @@ public static class SatisfactorySaveReader
                 && FindPathAfterMarker(body, pos, dataLen, PairedStationMarker) is { } paired)
                 scan.DronePairs[instance] = paired;
 
+            // Train wiring: a timetable's mStops reference station identifiers, an identifier's
+            // mStation names the station actor, and platform connections chain the freight
+            // platforms onto the station along the track.
+            if (instance.Contains(".FGRailroadTimeTable_", StringComparison.Ordinal))
+                scan.TimetableStops[instance] =
+                    CollectInstancePaths(body, pos, dataLen, ".FGTrainStationIdentifier_");
+
+            if (instance.Contains(".FGTrainStationIdentifier_", StringComparison.Ordinal)
+                && FindPathAfterExactMarker(body, pos, dataLen, StationMarker) is { } stationActor)
+                scan.StationOfIdentifier[instance] = stationActor;
+
+            if (instance.Contains(".PlatformConnection", StringComparison.Ordinal)
+                && FindPathAfterExactMarker(body, pos, dataLen, ConnectedToMarker) is { } connectedTo)
+                scan.PlatformLinks[instance] = connectedTo;
+
             pos += dataLen;
             if (saveVer >= 53)                                        // [>=53] per-object version data
             {
@@ -252,6 +278,43 @@ public static class SatisfactorySaveReader
     {
         var at = IndexOf(body, marker, start, start + len);
         return at < 0 ? null : FindInstancePath(body, at + marker.Length, start + len);
+    }
+
+    /// <summary>The first instance path after the *exactly*-named property
+    /// <paramref name="marker"/> (FString framing: length prefix and NUL terminator — so
+    /// "mStation" never matches "mStationName") within one object's data blob, or null.</summary>
+    private static string? FindPathAfterExactMarker(byte[] body, int start, int len, byte[] marker)
+    {
+        var end = start + len;
+        var pos = start;
+        while (true)
+        {
+            var at = IndexOf(body, marker, pos, end);
+            if (at < 4) return null;
+            pos = at + marker.Length;
+            if (BitConverter.ToInt32(body, at - 4) != marker.Length + 1) continue; // FString length
+            if (body[at + marker.Length] != 0) continue;                           // exact name
+            return FindInstancePath(body, at + marker.Length + 1, end);
+        }
+    }
+
+    /// <summary>Every instance-path string (printable run of ≥8 chars containing ':' and '.')
+    /// inside one object's data blob that contains <paramref name="token"/>, in blob order —
+    /// how a timetable's stop references are collected.</summary>
+    private static List<string> CollectInstancePaths(byte[] body, int start, int len, string token)
+    {
+        var results = new List<string>();
+        var run = new System.Text.StringBuilder();
+        var end = Math.Min(start + len, body.Length);
+        for (var i = start; i <= end; i++)
+        {
+            if (i < end && body[i] is >= 32 and < 127) { run.Append((char)body[i]); continue; }
+            if (run.Length >= 8 && run.ToString() is var s && s.Contains(':') && s.Contains('.')
+                && s.Contains(token, StringComparison.Ordinal))
+                results.Add(s);
+            run.Clear();
+        }
+        return results;
     }
 
     /// <summary>The first instance-path string (a printable run of ≥8 chars containing ':' and
@@ -297,6 +360,8 @@ public static class SatisfactorySaveReader
     private static readonly byte[] PathNetworkIdMarker = Encoding.ASCII.GetBytes("mPathNetworkID");
     private static readonly byte[] PairedStationMarker = Encoding.ASCII.GetBytes("mPairedStation");
     private static readonly byte[] CurrentRecipeMarker = Encoding.ASCII.GetBytes("mCurrentRecipe");
+    private static readonly byte[] StationMarker = Encoding.ASCII.GetBytes("mStation");
+    private static readonly byte[] ConnectedToMarker = Encoding.ASCII.GetBytes("mConnectedTo");
 
     /// <summary>The machine's <c>mCurrentRecipe</c> stem inside one object's data blob, or null.
     /// Same asset-path extraction the whole-body <see cref="ScanRecipeStems"/> uses, but attributed

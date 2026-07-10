@@ -83,6 +83,43 @@ public class SaveWorldScanTests
         Assert.Equal([droneA, droneB], drone.Stations.OrderBy(s => s, StringComparer.Ordinal));
     }
 
+    [Fact]
+    public void Scans_timetables_identifiers_and_platform_connections()
+    {
+        const string stationA = "Persistent_Level:PersistentLevel.Build_TrainStation_C_100";
+        const string stationB = "Persistent_Level:PersistentLevel.Build_TrainStation_C_200";
+        const string dockA = "Persistent_Level:PersistentLevel.Build_TrainDockingStation_C_110";
+        const string idA = "Persistent_Level:PersistentLevel.FGTrainStationIdentifier_101";
+        const string idB = "Persistent_Level:PersistentLevel.FGTrainStationIdentifier_201";
+        const string timetable = "Persistent_Level:PersistentLevel.FGRailroadTimeTable_300";
+        const string decoy = "Fake_Level:PersistentLevel.Build_TrainStation_C_999";
+
+        var scan = SatisfactorySaveReader.ScanObjectDataFromBody(AssembleBody(
+            (w => WriteObjectToc(w, "/Script/FactoryGame.FGRailroadTimeTable", timetable,
+                "Persistent_Level:PersistentLevel"),
+                [.. ObjectRefProperty("Station", idA), .. ObjectRefProperty("Station", idB)]),
+            // The identifier carries mStationName too; a decoy *before* mStation proves the scan
+            // matches the exact property name (mStation) rather than the mStationName prefix.
+            (w => WriteObjectToc(w, "/Script/FactoryGame.FGTrainStationIdentifier", idA,
+                "Persistent_Level:PersistentLevel"),
+                [.. ObjectRefProperty("mStationName", decoy), .. ObjectRefProperty("mStation", stationA)]),
+            (w => WriteObjectToc(w, "/Script/FactoryGame.FGTrainStationIdentifier", idB,
+                "Persistent_Level:PersistentLevel"),
+                ObjectRefProperty("mStation", stationB)),
+            (w => WriteObjectToc(w, "/Script/FactoryGame.FGTrainPlatformConnection",
+                stationA + ".PlatformConnection0", stationA),
+                ObjectRefProperty("mConnectedTo", dockA + ".PlatformConnection0")),
+            (w => WriteObjectToc(w, "/Script/FactoryGame.FGTrainPlatformConnection",
+                dockA + ".PlatformConnection0", dockA),
+                ObjectRefProperty("mConnectedTo", stationA + ".PlatformConnection0"))));
+
+        Assert.Equal([idA, idB], scan.TimetableStops[timetable]);
+        Assert.Equal(stationA, scan.StationOfIdentifier[idA]); // not the decoy
+        Assert.Equal(stationB, scan.StationOfIdentifier[idB]);
+        Assert.Equal(dockA + ".PlatformConnection0", scan.PlatformLinks[stationA + ".PlatformConnection0"]);
+        Assert.Equal(stationA + ".PlatformConnection0", scan.PlatformLinks[dockA + ".PlatformConnection0"]);
+    }
+
     // ------------------------------------------------------------- body builder
 
     private static byte[] BuildBody(float clock) => AssembleBody(
@@ -217,6 +254,21 @@ public class SaveWorldScanTests
         WriteFString(w, "IntProperty");
         w.Write(4); w.Write(0); w.Write((byte)0);
         w.Write(numItems);
+        w.Flush();
+        return ms.ToArray();
+    }
+
+    /// <summary>An ObjectProperty reference: property name, type, size/index pair, pad byte,
+    /// level name, then the target instance path — the framing every ref scan matches.</summary>
+    private static byte[] ObjectRefProperty(string name, string target)
+    {
+        using var ms = new MemoryStream();
+        using var w = new BinaryWriter(ms);
+        WriteFString(w, name);
+        WriteFString(w, "ObjectProperty");
+        w.Write(0); w.Write(38); w.Write((byte)0);
+        WriteFString(w, "Persistent_Level");
+        WriteFString(w, target);
         w.Flush();
         return ms.ToArray();
     }
