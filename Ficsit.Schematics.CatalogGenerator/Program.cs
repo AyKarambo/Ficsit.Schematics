@@ -33,6 +33,22 @@ public static class Program
                 var model = derivation.Derive();
                 return Verify.Run(model, derivation.Problems);
             }
+            case "--write":
+            {
+                var derivation = new Derivation.CatalogDerivation(export);
+                var model = derivation.Derive();
+                foreach (var problem in derivation.Problems)
+                    Console.Error.WriteLine($"problem: {problem}");
+                if (derivation.Problems.Count > 0)
+                {
+                    Console.Error.WriteLine("Not writing: resolve the problems above first.");
+                    return 4;
+                }
+                var files = Emit.CatalogWriter.Render(model);
+                Emit.CatalogWriter.Write(files, repoRoot);
+                Console.WriteLine($"Wrote {files.Count} file(s).");
+                return 0;
+            }
             default:
                 Console.Error.WriteLine($"Unknown mode '{mode}'. Use --stats, --verify or --write.");
                 return 2;
