@@ -59,10 +59,12 @@ function Find-SignTool {
 	if ($cmd) { return $cmd.Source }
 	$kitsRoot = Join-Path ${env:ProgramFiles(x86)} 'Windows Kits\10\bin'
 	if (Test-Path $kitsRoot) {
-		$candidates = Get-ChildItem $kitsRoot -Directory |
+		# @(...) keeps array semantics: with exactly one installed SDK the pipeline
+		# unrolls to a [string] and $candidates[0] would return its first character.
+		$candidates = @(Get-ChildItem $kitsRoot -Directory |
 			Where-Object Name -match '^10\.' | Sort-Object { [version]$_.Name } -Descending |
 			ForEach-Object { Join-Path $_.FullName 'x64\signtool.exe' } |
-			Where-Object { Test-Path $_ }
+			Where-Object { Test-Path $_ })
 		if ($candidates) { return $candidates[0] }
 	}
 	throw ("signtool.exe not found. Install the Windows SDK 'Signing Tools for Desktop Apps' " +
