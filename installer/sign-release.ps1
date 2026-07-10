@@ -60,7 +60,7 @@ function Find-SignTool {
 	$kitsRoot = Join-Path ${env:ProgramFiles(x86)} 'Windows Kits\10\bin'
 	if (Test-Path $kitsRoot) {
 		$candidates = Get-ChildItem $kitsRoot -Directory |
-			Where-Object Name -match '^10\.' | Sort-Object Name -Descending |
+			Where-Object Name -match '^10\.' | Sort-Object { [version]$_.Name } -Descending |
 			ForEach-Object { Join-Path $_.FullName 'x64\signtool.exe' } |
 			Where-Object { Test-Path $_ }
 		if ($candidates) { return $candidates[0] }
@@ -131,24 +131,24 @@ if (-not $AllowUnsigned) {
 $workDir = Join-Path ([System.IO.Path]::GetTempPath()) "ficsit-sign-$([Guid]::NewGuid().ToString('N'))"
 New-Item -ItemType Directory $workDir | Out-Null
 try {
-	Write-Host "Downloading $assetName from draft '$Tag' ..."
-	gh release download $Tag --pattern '*.msi' --dir $workDir
-	if ($LASTEXITCODE -ne 0) { throw 'gh release download failed.' }
-	$msi = Join-Path $workDir $assetName
-
 	if ($AllowUnsigned) {
 		Write-Warning 'Publishing UNSIGNED (-AllowUnsigned was passed) - users will see a hard SmartScreen warning.'
 	}
 	else {
+		Write-Host "Downloading $assetName from draft '$Tag' ..."
+		gh release download $Tag --pattern '*.msi' --dir $workDir
+		if ($LASTEXITCODE -ne 0) { throw 'gh release download failed.' }
+		$msi = Join-Path $workDir $assetName
+
 		Invoke-Sign $signtool $msi
 		if (-not (Test-Signature $signtool $msi)) {
 			throw 'Signature verification (signtool verify /pa) failed - not publishing. Pass -AllowUnsigned only if you really mean to ship unsigned.'
 		}
-	}
 
-	Write-Host "Replacing the release asset ..."
-	gh release upload $Tag $msi --clobber
-	if ($LASTEXITCODE -ne 0) { throw 'gh release upload failed.' }
+		Write-Host "Replacing the release asset with the signed installer ..."
+		gh release upload $Tag $msi --clobber
+		if ($LASTEXITCODE -ne 0) { throw 'gh release upload failed.' }
+	}
 
 	Write-Host "Publishing release '$Tag' ..."
 	gh release edit $Tag --draft=false
