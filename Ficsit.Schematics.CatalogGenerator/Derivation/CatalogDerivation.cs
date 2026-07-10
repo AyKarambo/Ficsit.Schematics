@@ -241,7 +241,9 @@ public sealed class CatalogDerivation
 
     private List<RecipeRow> DeriveExtractorRecipes(ModeledMachine machine)
     {
-        var entry = _export.ByClassName[machine.BuildClass];
+        // Missing export entry: DeriveMachineStats already reported the problem for this
+        // machine — derive nothing so verify mode prints it instead of crashing here.
+        if (!_export.ByClassName.TryGetValue(machine.BuildClass, out var entry)) return [];
         var rows = new List<RecipeRow>();
 
         // Extraction is available once the machine exists and any gating milestone is passed;
@@ -294,7 +296,8 @@ public sealed class CatalogDerivation
 
     private List<RecipeRow> DeriveFuelRecipes(ModeledMachine machine)
     {
-        var entry = _export.ByClassName[machine.BuildClass];
+        // Same graceful path as DeriveExtractorRecipes: the problem is already recorded.
+        if (!_export.ByClassName.TryGetValue(machine.BuildClass, out var entry)) return [];
         var power = Number(entry, "mPowerProduction") ?? Rational.One;
         var fuelLoad = Number(entry, "mFuelLoadAmount") ?? Rational.One;
         var supplementalRatio = Number(entry, "mSupplementalToPowerRatio") ?? Rational.Zero;

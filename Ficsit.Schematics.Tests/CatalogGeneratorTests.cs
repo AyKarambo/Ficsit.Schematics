@@ -1,3 +1,4 @@
+using System.Text.Json.Nodes;
 using Ficsit.Schematics.CatalogGenerator;
 using Ficsit.Schematics.CatalogGenerator.Derivation;
 using Ficsit.Schematics.CatalogGenerator.Emit;
@@ -64,6 +65,37 @@ public class CatalogGeneratorTests
                  ])
             Assert.DoesNotContain(generated,
                 path => path.EndsWith($"{hand}.cs", StringComparison.Ordinal));
+    }
+
+    /// <summary>A future export that drops or renames a modeled build class must surface as
+    /// derivation problems (so verify mode prints them all and exits), never as an
+    /// uncontextualized exception — for extractors and fuel generators like everything else.</summary>
+    [Fact]
+    public void A_machine_missing_from_the_export_is_a_reported_problem_not_a_crash()
+    {
+        var strippedPath = Path.Combine(Path.GetTempPath(), $"ficsit-docs-{Guid.NewGuid():N}.json");
+        try
+        {
+            // Strip the Water Extractor (extractor path) and Coal Generator (fuel path).
+            var root = JsonNode.Parse(File.ReadAllText(DocsPath))!.AsArray();
+            foreach (var group in root)
+                if (group?["Classes"] is JsonArray classes)
+                    for (var i = classes.Count - 1; i >= 0; i--)
+                        if (classes[i]?["ClassName"]?.GetValue<string>()
+                                is "Build_WaterPump_C" or "Build_GeneratorCoal_C")
+                            classes.RemoveAt(i);
+            File.WriteAllText(strippedPath, root.ToJsonString());
+
+            var derivation = new CatalogDerivation(DocsExport.Load(strippedPath));
+            derivation.Derive(); // must not throw
+
+            Assert.Contains("machine: no export entry for Build_WaterPump_C", derivation.Problems);
+            Assert.Contains("machine: no export entry for Build_GeneratorCoal_C", derivation.Problems);
+        }
+        finally
+        {
+            File.Delete(strippedPath);
+        }
     }
 
     /// <summary>Every alias target must exist in the current catalog, and no alias key may
