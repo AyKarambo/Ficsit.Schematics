@@ -1,17 +1,8 @@
-using Ficsit.Schematics.Core.Numerics;
-
 namespace Ficsit.Schematics.Core.GameData.Catalog;
 
 /// <summary>
-/// One mark of a multi-mark family in authoring form: the <see cref="Mark"/> and its
-/// per-mark stats. The family stamps the final name ("{family} Mk.{n}") onto both the
-/// machine and the variant.
+/// One mark of a multi-mark family: its sort key, <see cref="Mark"/> and whether it is
+/// the family's default. The mark's stats (tier, power, throughput, cost) come from the
+/// generated <c>MachineStats</c> table via the derived name "{family} Mk.{n}".
 /// </summary>
-public sealed record MarkSpec(
-    int Sort,
-    Mark Mark,
-    Tier Tier,
-    Rational Throughput,
-    bool IsDefault = false,
-    Rational? Power = null,
-    CostEntry[]? Cost = null);
+public sealed record MarkSpec(int Sort, Mark Mark, bool IsDefault = false);

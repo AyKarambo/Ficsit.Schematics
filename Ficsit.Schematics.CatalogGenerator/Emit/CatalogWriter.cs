@@ -26,6 +26,7 @@ public static class CatalogWriter
         var files = new Dictionary<string, string>(StringComparer.Ordinal)
         {
             ["Ficsit.Schematics.Core/GameData/Catalog/PartsCatalog.cs"] = RenderParts(model),
+            ["Ficsit.Schematics.Core/GameData/Catalog/Machines/MachineStats.g.cs"] = RenderMachineStats(model),
         };
 
         var sortIndex = GlobalRecipeOrder(model);
@@ -98,6 +99,62 @@ public static class CatalogWriter
         }
 
         sb.Append("    ];\n}\n");
+        return sb.ToString();
+    }
+
+    // ------------------------------------------------------------------ machine stats
+
+    private static string RenderMachineStats(CatalogModel model)
+    {
+        var sb = new StringBuilder();
+        sb.Append(Header);
+        sb.Append(
+            """
+            using Ficsit.Schematics.Core.Numerics;
+
+            namespace Ficsit.Schematics.Core.GameData.Catalog.Machines;
+
+            /// <summary>
+            /// Export-derived stats for every machine, keyed by machine name. The hand-authored
+            /// machine groups (families, marks, capacities) pull their numbers from here.
+            /// </summary>
+            internal static class MachineStats
+            {
+                public static MachineStat For(string machine) => ByName[machine];
+
+                public static readonly IReadOnlyDictionary<string, MachineStat> ByName = new Dictionary<string, MachineStat>(StringComparer.Ordinal)
+                {
+
+            """);
+
+        foreach (var stat in model.MachineStats)
+        {
+            sb.Append($"        [\"{stat.Name}\"] = new(\"{stat.Tier}\"");
+            if (stat.Power is { } power) sb.Append($", Power: {Literal(power)}");
+            if (stat.MinPower is { } min) sb.Append($", MinPower: {Literal(min)}");
+            if (stat.BasePower is { } basePower) sb.Append($", BasePower: {Literal(basePower)}");
+            if (stat.BasePowerBoost is { } baseBoost) sb.Append($", BasePowerBoost: {Literal(baseBoost)}");
+            if (stat.FueledBasePowerBoost is { } fueledBoost) sb.Append($", FueledBasePowerBoost: {Literal(fueledBoost)}");
+            if (stat.OverclockExp is { } exp) sb.Append($", OverclockExp: {Literal(exp)}");
+            if (stat.Sloops > 0) sb.Append($", Sloops: {stat.Sloops}");
+            if (stat.SloopMultiplier is { } sloopMultiplier) sb.Append($", SloopMultiplier: {Literal(sloopMultiplier)}");
+            if (stat.SloopPowerExp is { } sloopExp) sb.Append($", SloopPowerExp: {Literal(sloopExp)}");
+            if (stat.Cost is { Count: > 0 } cost)
+                sb.Append($", Cost: [{string.Join(", ", cost.Select(c => $"C(\"{c.Part}\", {c.Amount})"))}]");
+            if (stat.Throughput is { } throughput) sb.Append($", Throughput: {Literal(throughput)}");
+            sb.Append("),\n");
+        }
+
+        sb.Append(
+            """
+                };
+
+                private static Rational R(string text) => Rational.Parse(text);
+
+                private static CostEntry C(string part, int amount) => new() { Part = part, Amount = amount };
+            }
+
+            """);
         return sb.ToString();
     }
 
