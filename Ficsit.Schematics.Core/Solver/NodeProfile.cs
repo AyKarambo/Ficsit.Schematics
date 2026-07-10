@@ -131,7 +131,8 @@ internal sealed class NodeProfile
     }
 
     /// <summary>The recipe a generator runs: the one whose fuel (its first input) is wired in.
-    /// The first connected fuel wins when several are present.</summary>
+    /// When several fuels are connected, the first matching recipe in catalog order wins —
+    /// not the order in which the fuels were wired.</summary>
     private static RecipeDefinition? SelectGeneratorRecipe(FactoryNode node, GameDatabase data, FactoryDocument document)
     {
         var connected = document.Root.Connections
