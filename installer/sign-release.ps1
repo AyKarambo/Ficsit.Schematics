@@ -87,7 +87,9 @@ function Invoke-Sign([string]$signtool, [string]$path) {
 }
 
 function Test-Signature([string]$signtool, [string]$path) {
-	& $signtool verify /pa $path
+	# Pipe native stdout to the host: otherwise those lines join the function's
+	# output stream and the caller receives [stdout..., $bool] - always truthy.
+	& $signtool verify /pa $path | Write-Host
 	return ($LASTEXITCODE -eq 0)
 }
 
