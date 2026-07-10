@@ -1,0 +1,14 @@
+namespace Ficsit.Schematics.Core.GameData.Catalog.Recipes;
+
+/// <summary>Recipes that run on the Coal-Powered Generator.</summary>
+public sealed class CoalPoweredGeneratorRecipes : RecipeModule
+{
+    protected override string Machine => "Coal-Powered Generator";
+
+    protected override IReadOnlyList<Recipe> Recipes =>
+    [
+        new(105, "Coal Generator",           Batch: 4,         Tier: "3-1", [In("Coal", 1), In("Water", 3)], IgnoreInputMultiplier: true),
+        new(133, "Petroleum Coke Generator", Batch: R("12/5"), Tier: "5-2", [In("Petroleum Coke", 1), In("Water", R("9/5"))], IgnoreInputMultiplier: true),
+        new(153, "Compacted Coal Generator", Batch: R("42/5"), Tier: "5-4", [In("Compacted Coal", 1), In("Water", R("63/10"))], IgnoreInputMultiplier: true),
+    ];
+}

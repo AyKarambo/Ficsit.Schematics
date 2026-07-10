@@ -18,11 +18,12 @@ namespace Ficsit.Schematics.Core.Planning;
 /// </summary>
 public static class RevisedSimplexSolver
 {
-    public static RevisedSolveResult Minimize(SparseMatrix a, Rational[] b, Rational[] costs)
+    public static RevisedSolveResult Minimize(
+        SparseMatrix a, Rational[] b, Rational[] costs, CancellationToken cancellationToken = default)
     {
         ValidateInputs(a, b, costs);
         var m = a.Rows;
-        var state = new State(a, costs, m);
+        var state = new State(a, costs, m) { Cancel = cancellationToken };
         try
         {
             // Cold start: all-artificial basis, B⁻¹ = I, x_B = b.
@@ -53,21 +54,21 @@ public static class RevisedSimplexSolver
     /// </summary>
     public static RevisedSolveResult MinimizeWarm(
         SparseMatrix a, Rational[] b, Rational[] costs,
-        RevisedBasisSnapshot warm, int pinnedColumn)
+        RevisedBasisSnapshot warm, int pinnedColumn, CancellationToken cancellationToken = default)
     {
         ValidateInputs(a, b, costs);
         var m = a.Rows;
         if (warm.RowCount != m - 1 || warm.ColumnCount != a.Cols)
-            return Minimize(a, b, costs);
+            return Minimize(a, b, costs, cancellationToken);
 
         // The pinned column must be basic; find its row.
         var pinnedRow = -1;
         for (var i = 0; i < warm.RowCount; i++)
             if (warm.Basis[i] == pinnedColumn) { pinnedRow = i; break; }
         if (pinnedRow < 0)
-            return Minimize(a, b, costs);
+            return Minimize(a, b, costs, cancellationToken);
 
-        var state = new State(a, costs, m);
+        var state = new State(a, costs, m) { Cancel = cancellationToken };
         try
         {
             var old = m - 1;
@@ -91,7 +92,7 @@ public static class RevisedSimplexSolver
             state.RebuildIsBasic();
 
             if (state.BasicValues[old].IsNegative || state.BasicValues[old].IsPositive)
-                return Minimize(a, b, costs); // pin value mismatch — warm start invalid
+                return Minimize(a, b, costs, cancellationToken); // pin value mismatch — warm start invalid
 
             state.DriveOutArtificials();
             return state.RunPhase2();
@@ -126,6 +127,9 @@ public static class RevisedSimplexSolver
         public readonly int[] Basis;
         public readonly Rational[] BasisInverse; // flat m×m, pooled
         public readonly Rational[] BasicValues;  // pooled
+
+        /// <summary>Polled in the pivot loop so a runaway solve can be aborted.</summary>
+        public CancellationToken Cancel;
 
         public State(SparseMatrix a, Rational[] costs, int m)
         {
@@ -295,9 +299,14 @@ public static class RevisedSimplexSolver
             var totalColumns = _a.Cols + (allowArtificialEntering ? _m : 0);
             var stallThreshold = 2 * _m + 10;
             var consecutiveDegenerate = 0;
+            var iterations = 0;
             InitializeReducedCosts(phase1, totalColumns);
             while (true)
             {
+                // Cheap abort check — exact-rational pivots are costly, so a long
+                // solve is genuinely cancellable rather than freezing the app.
+                if ((++iterations & 0xFF) == 0) Cancel.ThrowIfCancellationRequested();
+
                 var entering = -1;
                 if (consecutiveDegenerate < stallThreshold)
                 {

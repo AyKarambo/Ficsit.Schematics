@@ -6,13 +6,16 @@ namespace Ficsit.Schematics;
 /// <summary>Recipe chooser: opening (double-click and drag-to-add), filtering and placement.</summary>
 public partial class MainPage
 {
-    private void ShowChooserAt(PointF screen)
+    private const float ChooserWidth = 470f;
+    private const float ChooserHeight = 440f;
+
+    private void ShowChooserAt(PointF screen, FactoryNode? avoidNode = null)
     {
         CloseOverlays();
         Chooser.ClearPortFilter();
         ChooserFilterRow.IsVisible = false;
         _chooserWorld = _drawable.ScreenToWorld(screen);
-        var position = ClampToPage(screen, 470, 440);
+        var position = PlaceChooserClear(screen, avoidNode);
         ChooserPanel.TranslationX = position.X;
         ChooserPanel.TranslationY = position.Y;
         Chooser.SearchText = string.Empty;
@@ -21,12 +24,51 @@ public partial class MainPage
     }
 
     /// <summary>
+    /// Clamp the chooser to the page and, when it opens from a port drag, keep it
+    /// from covering the drag's origin node: if the clamped rect overlaps that
+    /// node, try offering the chooser on the node's left / right / above / below,
+    /// picking the first on-page candidate that leaves the node fully visible.
+    /// </summary>
+    private PointF PlaceChooserClear(PointF screen, FactoryNode? avoidNode)
+    {
+        var position = ClampToPage(screen, ChooserWidth, ChooserHeight);
+        if (avoidNode is null || !_drawable.Layouts.TryGetValue(avoidNode, out var layout))
+            return position;
+
+        var tl = _drawable.WorldToScreen(new PointF(layout.Bounds.Left, layout.Bounds.Top));
+        var br = _drawable.WorldToScreen(new PointF(layout.Bounds.Right, layout.Bounds.Bottom));
+        var nodeRect = new RectF(tl.X, tl.Y, br.X - tl.X, br.Y - tl.Y);
+
+        if (!ChooserRect(position).IntersectsWith(nodeRect)) return position;
+
+        const float gap = 16f;
+        // Candidate top-left corners around the node, in preference order.
+        Span<PointF> candidates =
+        [
+            new(nodeRect.Left - gap - ChooserWidth, screen.Y), // left of node
+            new(nodeRect.Right + gap, screen.Y),               // right of node
+            new(screen.X, nodeRect.Bottom + gap),              // below node
+            new(screen.X, nodeRect.Top - gap - ChooserHeight), // above node
+        ];
+        foreach (var candidate in candidates)
+        {
+            var clamped = ClampToPage(candidate, ChooserWidth, ChooserHeight);
+            if (!ChooserRect(clamped).IntersectsWith(nodeRect))
+                return clamped;
+        }
+        return position; // no clear spot (node fills the view) — fall back.
+    }
+
+    private static RectF ChooserRect(PointF topLeft)
+        => new(topLeft.X, topLeft.Y, ChooserWidth, ChooserHeight);
+
+    /// <summary>
     /// A port was dragged onto empty canvas: open the chooser pre-filtered to
     /// compatible recipes; the chosen machine is placed there and wired up.
     /// </summary>
     private void ShowChooserForPort(PortDragContext context, PointF screen)
     {
-        ShowChooserAt(screen);
+        ShowChooserAt(screen, context.Node); // keep the drag-origin node visible
         if (context.Part == "AnyPart") return; // nothing to filter or connect on
 
         _pendingPortConnect = context;
@@ -35,6 +77,9 @@ public partial class MainPage
         ChooserFilterIcon.Source = _icons.GetSource(context.Part);
         ChooserFilterLabel.Text =
             $"{_loc.L(context.FromOutput ? "INPUTS" : "OUTPUTS")}: {_loc.L(context.Part)}";
+        // Backward (input-port) drag → offer to auto-plan the upstream supply.
+        ChooserAutoPlanButton.IsVisible = !context.FromOutput;
+        ChooserAutoPlanButton.Text = "⚡ Auto-Plan upstream";
     }
 
     private void OnChooserFilterCleared(object? sender, EventArgs e)
@@ -77,6 +122,18 @@ public partial class MainPage
 
         var node = _state.Editor.AddNode(name, x, y);
 
+        // An edge-rail drop inside an outpost creates the machine OUTSIDE: at the level above,
+        // beside the box (producers on the left, consumers on the right), so the connection
+        // below is a boundary crossing.
+        if (pending is { Outside: true } && _state.Editor.ActiveOutpost is { } scope)
+        {
+            node.Parent = scope.Parent;
+            node.X = pending.Value.FromOutput
+                ? scope.X + NodeLayout.CardWidth + 80
+                : scope.X - NodeLayout.CardWidth - 80;
+            node.Y = scope.Y;
+        }
+
         if (pending is { } context && context.Part != "AnyPart")
         {
             if (context.FromOutput && NodeAccepts(node, context.Part))
@@ -91,16 +148,22 @@ public partial class MainPage
         Chooser.ClearPortFilter();
     }
 
-    private bool NodeAccepts(FactoryNode node, string part)
-        => node.Kind != NodeKind.Recipe
-           || (Data.RecipesByName.TryGetValue(node.Name, out var recipe)
-               && recipe.Inputs.Any(i => i.Part == part));
+    private bool NodeAccepts(FactoryNode node, string part) => node.Kind switch
+    {
+        NodeKind.Recipe => Data.RecipesByName.TryGetValue(node.Name, out var recipe)
+            && recipe.Inputs.Any(i => i.Part == part),
+        // A generator takes only one of its machine's fuels (or water), not any part.
+        NodeKind.Generator => Data.Document.Recipes.Any(r => r.Machine == node.Name && r.Inputs.Any(i => i.Part == part)),
+        _ => true,
+    };
 
     private bool NodeProvides(FactoryNode node, string part) => node.Kind switch
     {
         NodeKind.Recipe => Data.RecipesByName.TryGetValue(node.Name, out var recipe)
             && recipe.Outputs.Any(o => o.Part == part),
         NodeKind.AwesomeSink or NodeKind.DimensionalDepot => false,
+        // Generators produce power, not a connectable item (except nuclear waste).
+        NodeKind.Generator => Data.Document.Recipes.Any(r => r.Machine == node.Name && r.Outputs.Any(o => o.Part == part)),
         _ => true,
     };
 

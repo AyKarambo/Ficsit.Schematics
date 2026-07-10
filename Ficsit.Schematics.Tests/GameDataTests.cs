@@ -30,35 +30,35 @@ public class GameDataTests
         {
             Machines = db.Document.Machines
                 .Select(m => new {
-                    m.Name, m.Tier,
-                    m.AveragePower, m.MinPower, m.BasePower,
-                    m.BasePowerBoost, m.FueledBasePowerBoost,
-                    m.OverclockPowerExponent,
+                    m.Name, Tier = m.Tier.ToString(),
+                    AveragePower = m.AveragePower?.ToString(), MinPower = m.MinPower?.ToString(), BasePower = m.BasePower?.ToString(),
+                    BasePowerBoost = m.BasePowerBoost?.ToString(), FueledBasePowerBoost = m.FueledBasePowerBoost?.ToString(),
+                    OverclockPowerExponent = m.OverclockPowerExponent?.ToString(),
                     m.MaxProductionShards,
-                    m.ProductionShardMultiplier, m.ProductionShardPowerExponent,
-                    Cost = m.Cost.Select(c => new { c.Part, c.Amount }).ToList(),
+                    ProductionShardMultiplier = m.ProductionShardMultiplier?.ToString(), ProductionShardPowerExponent = m.ProductionShardPowerExponent?.ToString(),
+                    Cost = m.Cost.Select(c => new { c.Part, Amount = c.Amount.ToString() }).ToList(),
                 })
                 .ToList(),
 
             MultiMachines = db.Document.MultiMachines
                 .Select(mm => new {
                     mm.Name, mm.ShowPpm, mm.AutoRound, mm.DefaultMax,
-                    Machines = mm.Machines.Select(v => new { v.Name, v.PartsRatio, v.Default }).ToList(),
-                    Capacities = mm.Capacities.Select(c => new { c.Name, c.PartsRatio, c.PowerRatio, c.Default, c.Color }).ToList(),
+                    Machines = mm.Machines.Select(v => new { v.Name, PartsRatio = v.PartsRatio?.ToString(), v.Default }).ToList(),
+                    Capacities = mm.Capacities.Select(c => new { c.Name, PartsRatio = c.PartsRatio?.ToString(), PowerRatio = c.PowerRatio?.ToString(), c.Default, c.Color }).ToList(),
                 })
                 .ToList(),
 
             Parts = db.Document.Parts
-                .Select(p => new { p.Name, p.Tier, p.SinkPoints, p.Fluid, p.IsManuallyGathered })
+                .Select(p => new { p.Name, Tier = p.Tier.ToString(), p.SinkPoints, p.Fluid, p.IsManuallyGathered })
                 .ToList(),
 
             Recipes = db.Document.Recipes
                 .Select(r => new {
-                    r.Name, r.Machine, r.BatchTime, r.Tier,
+                    r.Name, r.Machine, BatchTime = r.BatchTime.ToString(), Tier = r.Tier.ToString(),
                     r.Alternate, r.Ficsmas,
-                    r.AveragePower, r.MinPower,
-                    r.IgnoreInputMultiplier, r.SpaceElevatorMultiplier,
-                    Parts = r.Parts.Select(p => new { p.Part, p.Amount }).ToList(),
+                    AveragePower = r.AveragePower?.ToString(), MinPower = r.MinPower?.ToString(),
+                    r.IgnoreInputMultiplier, SpaceElevatorMultiplier = r.SpaceElevatorMultiplier?.ToString(),
+                    Parts = r.Parts.Select(p => new { p.Part, Amount = p.Amount.ToString() }).ToList(),
                 })
                 .ToList(),
         };
@@ -155,5 +155,22 @@ public class GameDataTests
         // 2 plates / 6 s → 20/min; 3 ingots / 6 s → -30/min.
         Assert.Equal("20", recipe.RatePerMinute("Iron Plate").ToString());
         Assert.Equal("-30", recipe.RatePerMinute("Iron Ingot").ToString());
+    }
+
+    [Fact]
+    public void MaxBeltThroughput_equals_top_belt_mark_from_catalog()
+    {
+        // AWESOME Sink belt marks: Mk1=60, Mk2=120, Mk3=270, Mk4=480, Mk5=780, Mk6=1200.
+        // The maximum is 1200/min (Mk.6 Belt).
+        var db = TestData.Database;
+        Assert.Equal(new Ficsit.Schematics.Core.Numerics.Rational(1200), db.MaxBeltThroughput);
+    }
+
+    [Fact]
+    public void MaxPipeThroughput_equals_Mk2_pipe_value()
+    {
+        // Satisfactory Mk.2 pipe capacity is 600/min.
+        var db = TestData.Database;
+        Assert.Equal(new Ficsit.Schematics.Core.Numerics.Rational(600), db.MaxPipeThroughput);
     }
 }

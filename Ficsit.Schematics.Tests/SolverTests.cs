@@ -1,3 +1,4 @@
+using Ficsit.Schematics.Core.Editing;
 using Ficsit.Schematics.Core.Model;
 using Ficsit.Schematics.Core.Numerics;
 using Ficsit.Schematics.Core.Serialization;
@@ -53,6 +54,39 @@ public class SolverTests
         var result = Solve(doc);
         Assert.Equal(new Rational(2), result.For(smelter).Count);
         Assert.Equal(new Rational(60), result.For(miner).DisplayValue); // pulls 60 ore
+    }
+
+    [Fact]
+    public void Snapped_extractor_scales_output_with_overclock()
+    {
+        // A miner placed on a map resource node is one physical machine: overclocking it must
+        // scale the parts-per-minute (issue #7). The auto-applied ppm default Max ("60") must
+        // not cap output at the 100% value.
+        var doc = new FactoryDocument();
+        var miner = Node(doc, "Iron Ore", "60");
+        miner.ResourceNodeId = "/Game/.../BP_ResourceNode_42"; // marks it snapped to a node
+        miner.ClockSpeed = new Rational(3, 2);                  // 150%
+
+        var result = Solve(doc);
+        // Mk.1 miner on a Normal node at 150% → 90/min, one machine.
+        Assert.Equal(new Rational(90), result.For(miner).DisplayValue);
+        Assert.Equal(Rational.One, result.For(miner).Count);
+        Assert.True(result.For(miner).IsPpmDisplay);
+    }
+
+    [Fact]
+    public void Snapped_extractor_shows_full_output_for_node_purity()
+    {
+        // Snapping adopts the node purity (×2 for Pure); the displayed rate must reflect it,
+        // not the default ppm Max (issue #7).
+        var doc = new FactoryDocument();
+        var miner = Node(doc, "Iron Ore", "60");
+        miner.ResourceNodeId = "/Game/.../BP_ResourceNode_7";
+        miner.Capacity = "Pure";
+
+        var result = Solve(doc);
+        Assert.Equal(new Rational(120), result.For(miner).DisplayValue);
+        Assert.Equal(Rational.One, result.For(miner).Count);
     }
 
     [Fact]
@@ -134,6 +168,50 @@ public class SolverTests
     }
 
     [Fact]
+    public void Full_solver_routes_priority_splitter_by_branch_order()
+    {
+        var doc = new FactoryDocument();
+        var miner = Node(doc, "Iron Ore", "60");
+        var splitter = Node(doc, "Priority Splitter");
+        var a = Node(doc, "Iron Ingot", "2"); // first branch — wants 60
+        var b = Node(doc, "Iron Ingot", "2"); // second branch — wants 60 (total 120 > 60)
+        Connect(doc, miner, "Iron Ore", splitter);
+        Connect(doc, splitter, "Iron Ore", a);
+        Connect(doc, splitter, "Iron Ore", b);
+
+        // Basic shares proportionally: equal demand → 30 each → one machine each.
+        var basic = SolverFactory.Create("Basic", TestData.Database).Solve(doc);
+        Assert.Equal(Rational.One, basic.For(a).Count);
+        Assert.Equal(Rational.One, basic.For(b).Count);
+
+        // Full fills the first branch fully (2 machines), starving the second.
+        var full = SolverFactory.Create("Full", TestData.Database).Solve(doc);
+        Assert.Equal(new Rational(2), full.For(a).Count);
+        Assert.Equal(Rational.Zero, full.For(b).Count);
+    }
+
+    [Fact]
+    public void Full_solver_drains_priority_merger_by_branch_order()
+    {
+        var doc = new FactoryDocument();
+        var minerA = Node(doc, "Iron Ore", "60"); // first branch (priority)
+        var minerB = Node(doc, "Iron Ore", "60"); // second branch
+        var merger = Node(doc, "Priority Merger");
+        var smelter = Node(doc, "Iron Ingot", "2"); // wants 60 total
+        Connect(doc, minerA, "Iron Ore", merger);
+        Connect(doc, minerB, "Iron Ore", merger);
+        Connect(doc, merger, "Iron Ore", smelter);
+
+        var full = SolverFactory.Create("Full", TestData.Database).Solve(doc);
+
+        var aConn = doc.Root.Connections.First(c => c.From == minerA);
+        var bConn = doc.Root.Connections.First(c => c.From == minerB);
+        Assert.Equal(new Rational(60), full.Flows[aConn]); // first supplier drained first
+        Assert.Equal(Rational.Zero, full.Flows[bConn]);    // second untouched
+        Assert.Equal(new Rational(2), full.For(smelter).Count);
+    }
+
+    [Fact]
     public void Merger_combines_two_sources()
     {
         var doc = new FactoryDocument();
@@ -172,6 +250,166 @@ public class SolverTests
         Assert.Equal(new Rational(60), result.For(sink).DisplayValue);
         // Iron ore sinks for 1 point each → 60 points/min.
         Assert.Equal(new Rational(60), result.For(sink).SinkPointsPerMinute);
+    }
+
+    // ------------------------------------------------------------ Outposts (flat model)
+
+    [Fact]
+    public void A_member_connects_across_the_outpost_boundary()
+    {
+        // Flat model: an outpost is a grouping. A member (Parent = outpost) connects to a node
+        // outside it as an ordinary connection; flow crosses the boundary freely.
+        var doc = new FactoryDocument();
+        var miner = Node(doc, "Iron Ore", "60");        // root
+        var outpost = Node(doc, "Outpost");              // grouping
+        var smelter = Node(doc, "Iron Ingot", "2");      // member, wants 60 ore
+        smelter.Parent = outpost;
+        Connect(doc, miner, "Iron Ore", smelter);
+
+        var result = Solve(doc);
+        Assert.Equal(new Rational(2), result.For(smelter).Count);
+        Assert.Equal(new Rational(60), result.Flows[doc.Root.Connections.Single()]);
+    }
+
+    [Fact]
+    public void Outpost_container_is_inert_in_the_solve()
+    {
+        var doc = new FactoryDocument();
+        var outpost = Node(doc, "Outpost");
+        Assert.Equal(Rational.Zero, Solve(doc).For(outpost).Count); // a bracket, not a machine
+    }
+
+    [Fact]
+    public void Deleting_an_outpost_deletes_its_members()
+    {
+        var doc = new FactoryDocument();
+        var outpost = Node(doc, "Outpost");
+        var smelter = Node(doc, "Iron Ingot");
+        smelter.Parent = outpost;
+
+        var editor = new FactoryEditor(TestData.Database);
+        editor.LoadDocument(doc);
+        editor.DeleteNodes([outpost]);
+
+        Assert.Empty(doc.Root.Nodes); // the outpost and its member are both removed
+    }
+
+    [Fact]
+    public void Adding_a_node_inside_an_outpost_sets_its_parent()
+    {
+        var editor = new FactoryEditor(TestData.Database);
+        editor.LoadDocument(new FactoryDocument());
+        var outpost = editor.AddNode("Outpost", 0, 0);
+        editor.EnterOutpost(outpost);
+        var inner = editor.AddNode("Iron Ingot", 10, 10);
+
+        Assert.Equal(outpost, inner.Parent);
+        Assert.Contains(inner, editor.VisibleNodes);
+        Assert.DoesNotContain(outpost, editor.VisibleNodes); // outpost itself lives at root
+    }
+
+    [Fact]
+    public void Outpost_member_exports_across_the_boundary()
+    {
+        // Flat model: a member produces to a node outside the outpost as an ordinary connection —
+        // no Import/Export handle. 60 ore crosses out of the outpost and runs 2 smelters.
+        var doc = new FactoryDocument();
+        var outpost = Node(doc, "Outpost");
+        var miner = Node(doc, "Iron Ore", "60");
+        miner.Parent = outpost;                  // member
+        var smelter = Node(doc, "Iron Ingot");   // root, pulls the ore out
+        Connect(doc, miner, "Iron Ore", smelter);
+
+        var result = Solve(doc);
+        Assert.Equal(new Rational(2), result.For(smelter).Count);
+        Assert.Equal(new Rational(60), result.Flows[doc.Root.Connections.Single()]);
+    }
+
+    [Fact]
+    public void Crossing_connection_runs_both_directions_through_a_nested_outpost()
+    {
+        // miner (root) → smelter (member) → constructor (root): flow crosses in and back out of
+        // the outpost, both as plain connections. The outpost itself stays inert.
+        var doc = new FactoryDocument();
+        var outpost = Node(doc, "Outpost");
+        var miner = Node(doc, "Iron Ore", "60");
+        var smelter = Node(doc, "Iron Ingot");
+        smelter.Parent = outpost;
+        var rod = Node(doc, "Iron Rod");
+        Connect(doc, miner, "Iron Ore", smelter);
+        Connect(doc, smelter, "Iron Ingot", rod);
+
+        var result = Solve(doc);
+        Assert.Equal(new Rational(2), result.For(smelter).Count);  // 60 ore → 2 smelters → 60 ingot
+        Assert.Equal(Rational.Zero, result.For(outpost).Count);    // a bracket, not a machine
+    }
+
+    // ------------------------------------------------------------ Generators (unified, any fuel)
+
+    private static FactoryNode Generator(FactoryDocument doc, string machine, string? max = null)
+    {
+        var node = new FactoryNode { Name = machine, Kind = NodeKind.Generator, Max = max };
+        doc.Root.Nodes.Add(node);
+        return node;
+    }
+
+    [Fact]
+    public void Generator_burns_the_connected_fuel_and_outputs_rated_power()
+    {
+        var doc = new FactoryDocument();
+        var supply = Node(doc, "Storage Container");
+        supply.StorageMode = StorageMode.Full; // open source of Fuel
+        var gen = Generator(doc, "Fuel-Powered Generator", "2");
+        Connect(doc, supply, "Fuel", gen);
+
+        var result = Solve(doc);
+        Assert.Equal(new Rational(2), result.For(gen).Count);    // 2 generators (the limit)
+        Assert.Equal(new Rational(500), result.For(gen).Power);  // 2 × 250 MW (positive = generates)
+        // Fuel Generator: In Fuel 1, Batch 3 → 20/min each → 40/min for two.
+        Assert.Equal(new Rational(40), result.For(gen).Inputs["Fuel"].Target);
+    }
+
+    [Fact]
+    public void Generator_accepts_a_different_fuel_at_that_fuels_rate()
+    {
+        var doc = new FactoryDocument();
+        var supply = Node(doc, "Storage Container");
+        supply.StorageMode = StorageMode.Full;
+        var gen = Generator(doc, "Fuel-Powered Generator", "1");
+        Connect(doc, supply, "Turbofuel", gen); // same machine, different fuel — just connect
+
+        var result = Solve(doc);
+        Assert.Equal(Rational.One, result.For(gen).Count);
+        // Turbofuel Generator: In Turbofuel 1, Batch 8 → 7.5/min each.
+        Assert.Equal(new Rational(15, 2), result.For(gen).Inputs["Turbofuel"].Target);
+    }
+
+    [Fact]
+    public void Generator_with_no_fuel_shows_rated_power_for_its_count()
+    {
+        var doc = new FactoryDocument();
+        var gen = Generator(doc, "Fuel-Powered Generator", "3");
+
+        var result = Solve(doc);
+        Assert.Equal(new Rational(3), result.For(gen).Count);    // a placed generator, no fuel yet
+        Assert.Equal(new Rational(750), result.For(gen).Power);  // 3 × 250 MW rated
+    }
+
+    [Fact]
+    public void Coal_generator_is_limited_by_its_water_supply()
+    {
+        // Coal Generator: In Coal 1 (Batch 4 → 15/min), In Water 3 (→ 45/min) per generator.
+        var doc = new FactoryDocument();
+        var coal = Node(doc, "Coal", "30");   // enough coal for 2 generators
+        var water = Node(doc, "Storage Container");
+        water.StorageMode = StorageMode.Full;
+        var gen = Generator(doc, "Coal-Powered Generator");
+        Connect(doc, coal, "Coal", gen);
+        Connect(doc, water, "Water", gen);
+
+        var result = Solve(doc);
+        Assert.Equal(new Rational(2), result.For(gen).Count);   // coal-limited to 2
+        Assert.Equal(new Rational(90), result.For(gen).Inputs["Water"].Target); // 2 × 45 water
     }
 
     [Fact]
@@ -288,6 +526,58 @@ public class SolverTests
         Assert.Equal(new Rational(5), node.Count);              // ceil(W / (W/5)) == 5: stable
         Assert.Equal(new Rational(11, 10), node.EffectiveClock); // exactly the stored clock
         Assert.Equal(new Rational(165), node.Inputs["Iron Ore"].Target);
+    }
+
+    [Fact]
+    public void Stepping_a_limited_auto_round_node_moves_count_not_throughput()
+    {
+        // Bug #15: a count-display Max pins the count independent of clock, so the old
+        // stepper (clock only) changed the output instead of the machine count. The fix
+        // moves the limit with the clock so the count steps and throughput is preserved.
+        var doc = new FactoryDocument();
+        var miner = Node(doc, "Iron Ore", "300");   // ample ore, so the smelter's Max binds
+        var smelter = Node(doc, "Iron Ingot", "6");  // count limit = 6 machines
+        smelter.AutoRound = true;
+        Connect(doc, miner, "Iron Ore", smelter);
+
+        var editor = new FactoryEditor(TestData.Database);
+        editor.LoadDocument(doc);
+
+        var before = editor.Result.For(smelter);
+        Assert.Equal(new Rational(6), before.Count);
+        var outputBefore = before.Outputs["Iron Ingot"].Target;
+        var oreBefore = before.Inputs["Iron Ore"].Target;
+
+        editor.StepAutoRound(smelter, +1); // one more machine
+
+        var after = editor.Result.For(smelter);
+        Assert.Equal(new Rational(7), after.Count);                      // count moved 6 → 7
+        Assert.Equal(outputBefore, after.Outputs["Iron Ingot"].Target); // throughput unchanged
+        Assert.Equal(oreBefore, after.Inputs["Iron Ore"].Target);
+    }
+
+    [Fact]
+    public void Moving_a_node_refreshes_without_resolving_but_edits_resolve()
+    {
+        var doc = new FactoryDocument();
+        var miner = Node(doc, "Iron Ore", "60");
+        var smelter = Node(doc, "Iron Ingot");
+        Connect(doc, miner, "Iron Ore", smelter);
+
+        var editor = new FactoryEditor(TestData.Database);
+        editor.LoadDocument(doc);
+
+        var solves = 0;
+        var geometryChanges = 0;
+        editor.Solved += () => solves++;
+        editor.GeometryChanged += () => geometryChanges++;
+
+        editor.MoveNodes([smelter], 50, 50, coalesce: false);
+        Assert.Equal(0, solves);          // a pure position change must not re-solve
+        Assert.Equal(1, geometryChanges); // but the view is told to refresh
+
+        editor.SetClockSpeed(smelter, new Rational(3, 2));
+        Assert.Equal(1, solves);          // a real edit still re-solves
     }
 
     [Fact]

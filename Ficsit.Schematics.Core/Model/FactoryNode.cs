@@ -50,15 +50,26 @@ public sealed class FactoryNode
 
     public StorageMode StorageMode { get; set; } = StorageMode.PartiallyFull;
 
+    /// <summary>User-chosen display order of input ports (part names, top to bottom). Empty =
+    /// natural order. Parts absent here keep their natural order, appended after listed ones.</summary>
+    public List<string> InputOrder { get; set; } = [];
+
+    /// <summary>User-chosen display order of output ports. See <see cref="InputOrder"/>.</summary>
+    public List<string> OutputOrder { get; set; } = [];
+
     /// <summary>
     /// Map-mode anchor: the save-file instance path of the resource node this
     /// extractor is snapped to; null when unassigned. (Our extension to .sfmd.)
     /// </summary>
     public string? ResourceNodeId { get; set; }
 
-    /// <summary>Nested canvas for outposts/blueprints.</summary>
-    public FactoryGraph? Children { get; set; }
+    /// <summary>
+    /// The outpost/blueprint this node belongs to (its "bracket"); null = root canvas.
+    /// Membership is flat — all nodes live in one list and group via this reference.
+    /// </summary>
+    public FactoryNode? Parent { get; set; }
 
+    /// <summary>An outpost/blueprint's own view (zoom/pan) when it is the focused scope.</summary>
     public double InnerZoom { get; set; } = 1.0;
     public double InnerPanX { get; set; }
     public double InnerPanY { get; set; }

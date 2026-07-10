@@ -37,9 +37,15 @@ public partial class MainPage
                 _controller.PointerMoved(pos, leftDown, rightDown);
 
                 if (!leftDown && !rightDown)
+                {
+                    if (_controller.UpdateHover(pos)) Canvas.Invalidate();
                     UpdateHoverTooltip(pos);
-                else if (_lastTooltip is not null)
-                    UpdateHoverTooltip(null);
+                }
+                else
+                {
+                    if (_controller.UpdateHover(null)) Canvas.Invalidate();
+                    if (_lastTooltip is not null) UpdateHoverTooltip(null);
+                }
             };
 
             canvasNative.PointerReleased += (s, e) =>
@@ -63,7 +69,11 @@ public partial class MainPage
                 e.Handled = true;
             };
 
-            canvasNative.PointerExited += (_, _) => UpdateHoverTooltip(null);
+            canvasNative.PointerExited += (_, _) =>
+            {
+                if (_controller.UpdateHover(null)) Canvas.Invalidate();
+                UpdateHoverTooltip(null);
+            };
         }
 
         if (Handler?.PlatformView is Microsoft.UI.Xaml.UIElement pageNative)
@@ -110,6 +120,7 @@ public partial class MainPage
                 _controller.DeleteSelection();
                 break;
             case Windows.System.VirtualKey.Escape:
+                _controller.Cancel();
                 HandleEscape();
                 break;
             case Windows.System.VirtualKey.Z when ctrl:
@@ -119,7 +130,7 @@ public partial class MainPage
                 _state.Editor.Commands.Redo();
                 break;
             case Windows.System.VirtualKey.A when ctrl:
-                _state.SetSelection(_state.Editor.CurrentScope.Nodes);
+                _state.SetSelection(_state.Editor.VisibleNodes.ToList());
                 break;
             case Windows.System.VirtualKey.C when ctrl:
                 _state.Editor.Copy(_state.Selection.ToList());

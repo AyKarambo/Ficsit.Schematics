@@ -128,8 +128,10 @@ screenshots only document features.
   Full / Full / Empty / Input = Output), AWESOME Sink (sink-points/min), Dimensional Depot.
 - **Solvers** (selectable in settings, persisted per save): **None** (no calc), **Manual**
   (entered values are desired outcomes, spreadsheet-like), **Basic** (entered values are limits;
-  propagation; ignores splitter/merger preferences) — and **Full** (LP over the whole graph,
-  honors priorities) as the post-v1 stretch goal. v1 ships None/Manual/Basic with Basic default.
+  propagation; ignores splitter/merger preferences) — and **Full** (honors splitter/merger
+  priorities). **Full is now implemented** as priority-aware routing layered on Basic (see
+  [specs/full-solver.md](specs/full-solver.md)); a global-LP refinement remains future work.
+  Default stays Basic.
 - Global multipliers: Space Elevator deliverable cost ×, recipe parts cost ×, power consumption ×.
 - **Summary panel** (toggle bottom-left): scope dropdown (Everything / Current Outpost (& Below) /
   Selected (& Below / + Connected)), collapsible sections — Power (avg net/min-max, used, made,

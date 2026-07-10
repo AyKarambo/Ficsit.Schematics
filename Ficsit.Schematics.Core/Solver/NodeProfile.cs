@@ -93,13 +93,51 @@ internal sealed class NodeProfile
                 profile.LimitCount = node.LimitValue is { } depotLimit ? depotLimit / profile.PpmUnit : null;
                 break;
 
+            case NodeKind.Generator:
+                BuildGeneratorProfile(profile, node, data, document);
+                break;
+
             case NodeKind.Outpost:
             case NodeKind.Blueprint:
-                // Outposts are visual grouping; their interior solves as part of the same pass.
+                // Pure grouping ("bracket"): not a machine, excluded from the solve. Members
+                // (Parent == this outpost) are normal nodes solved as part of the flat graph.
                 break;
         }
 
         return profile;
+    }
+
+    /// <summary>
+    /// A unified generator burns whichever fuel is wired in: it runs that fuel's recipe (so a
+    /// single connected fuel behaves exactly like the per-fuel recipe — fuel/water in, power out,
+    /// waste out). With no fuel wired it shows the machine's rated power for the entered count.
+    /// </summary>
+    private static void BuildGeneratorProfile(NodeProfile profile, FactoryNode node, GameDatabase data, FactoryDocument document)
+    {
+        if (SelectGeneratorRecipe(node, data, document) is { } recipe)
+        {
+            ApplyRecipe(profile, node, data, document, recipe);
+            return;
+        }
+
+        profile.IsPpmDisplay = false;
+        profile.LimitCount = node.LimitValue;
+        if (data.MachinesByName.TryGetValue(node.Name, out var machine))
+        {
+            profile._machine = machine;
+            profile._powerMultiplier = GameDatabase.ParseOrZero(document.PowerMultiplier);
+            profile.PowerPerMachine = profile.PowerPerMachineAt(node.ClockSpeed);
+        }
+    }
+
+    /// <summary>The recipe a generator runs: the one whose fuel (its first input) is wired in.
+    /// The first connected fuel wins when several are present.</summary>
+    private static RecipeDefinition? SelectGeneratorRecipe(FactoryNode node, GameDatabase data, FactoryDocument document)
+    {
+        var connected = document.Root.Connections
+            .Where(c => c.To == node).Select(c => c.Part).ToHashSet();
+        return data.Document.Recipes.FirstOrDefault(
+            r => r.Machine == node.Name && r.Inputs.FirstOrDefault() is { } fuel && connected.Contains(fuel.Part));
     }
 
     private static void BuildRecipeProfile(NodeProfile profile, FactoryNode node, GameDatabase data, FactoryDocument document)
@@ -110,7 +148,11 @@ internal sealed class NodeProfile
             profile.LimitCount = node.LimitValue;
             return;
         }
+        ApplyRecipe(profile, node, data, document, recipe);
+    }
 
+    private static void ApplyRecipe(NodeProfile profile, FactoryNode node, GameDatabase data, FactoryDocument document, RecipeDefinition recipe)
+    {
         var family = data.MultiMachinesByName.TryGetValue(recipe.Machine, out var byFamily)
             ? byFamily
             : data.MultiMachineFor(recipe.Machine);
@@ -141,10 +183,9 @@ internal sealed class NodeProfile
         data.MachinesByName.TryGetValue(machineName, out var machine);
 
         var clock = node.ClockSpeed;
-        var sloopBoost = Rational.One;
-        if (node.Somersloops > 0 && machine is { MaxProductionShards: > 0 })
-            sloopBoost = Rational.One
-                + new Rational(node.Somersloops, machine.MaxProductionShards) * machine.ProductionShardMultiplierValue;
+        var sloopBoost = machine is not null
+            ? Amplification.OutputFactor(machine, node.Somersloops)
+            : Rational.One;
 
         var inputMultiplier = GameDatabase.ParseOrZero(
             recipe.Machine == "Space Elevator" ? document.SpaceElevatorMultiplier : document.InputMultiplier);
@@ -169,6 +210,13 @@ internal sealed class NodeProfile
         if (node.LimitValue is { } limit)
             profile.LimitCount = profile.IsPpmDisplay && !profile.PpmUnit.IsZero ? limit / profile.PpmUnit : limit;
 
+        // A map-snapped extractor models exactly one physical machine fixed to its resource
+        // node: its output is mark × purity × clock at full rate. Pin it to a single machine so
+        // the ppm scales with the overclock (issue #7) — the auto-applied ppm default Max would
+        // otherwise cap output at the 100% value and silently cancel any overclock or purity.
+        if (node.ResourceNodeId is not null)
+            profile.LimitCount = Rational.One;
+
         if (machine is not null)
         {
             profile._machine = machine;
@@ -192,10 +240,7 @@ internal sealed class NodeProfile
         var clockFactor = clock == Rational.One
             ? 1.0
             : clock.Pow(_machine.OverclockPowerExponentValue);
-        var sloopPowerFactor = Node.Somersloops > 0 && _machine.MaxProductionShards > 0
-            ? new Rational(_machine.MaxProductionShards + Node.Somersloops, _machine.MaxProductionShards)
-                .Pow(_machine.ProductionShardPowerExponentValue)
-            : 1.0;
+        var sloopPowerFactor = Amplification.PowerFactor(_machine, Node.Somersloops);
         var approx = power.ToDouble() * clockFactor * (power.IsNegative ? sloopPowerFactor : 1.0);
         if (!_powerMultiplier.IsZero && power.IsNegative) approx *= _powerMultiplier.ToDouble();
         return FromDouble(approx) * _powerRatio;

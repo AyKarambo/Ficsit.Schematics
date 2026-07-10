@@ -34,6 +34,23 @@ public class SfmdSerializerTests
     }
 
     [Fact]
+    public void Roundtrip_preserves_a_connections_logistics_kind()
+    {
+        var doc = new FactoryDocument();
+        var producer = new FactoryNode { Name = "Iron Ingot", Kind = NodeKind.Recipe };
+        var consumer = new FactoryNode { Name = "Iron Plate", Kind = NodeKind.Recipe };
+        doc.Root.Nodes.AddRange([producer, consumer]);
+        doc.Root.Connections.Add(new NodeConnection
+            { From = producer, To = consumer, Part = "Iron Ingot", Logistics = LogisticsKind.Truck });
+
+        var reloaded = SfmdSerializer.Deserialize(SfmdSerializer.Serialize(doc));
+
+        var connection = Assert.Single(reloaded.Root.Connections);
+        Assert.Equal(LogisticsKind.Truck, connection.Logistics);
+        Assert.Equal("Iron Ingot", connection.Part);
+    }
+
+    [Fact]
     public void Roundtrip_preserves_structure()
     {
         var original = SfmdSerializer.Deserialize(File.ReadAllText(TestData.ReferenceSavePath));
@@ -79,19 +96,109 @@ public class SfmdSerializerTests
     }
 
     [Fact]
-    public void Nested_outpost_children_roundtrip()
+    public void Port_order_overrides_roundtrip()
     {
         var doc = new FactoryDocument();
-        var outpost = new FactoryNode { Name = "Outpost", Kind = NodeKind.Outpost, Children = new FactoryGraph() };
-        var inner = new FactoryNode { Name = "Iron Ingot", Max = "2" };
-        outpost.Children.Nodes.Add(inner);
-        doc.Root.Nodes.Add(outpost);
+        var node = new FactoryNode
+        {
+            Name = "Heavy Flexible Frame",
+            InputOrder = ["Rubber", "Modular Frame", "Screw"],
+            OutputOrder = ["Heavy Modular Frame"],
+        };
+        doc.Root.Nodes.Add(node);
 
         var reloaded = SfmdSerializer.Deserialize(SfmdSerializer.Serialize(doc));
-        var reloadedOutpost = Assert.Single(reloaded.Root.Nodes);
-        Assert.NotNull(reloadedOutpost.Children);
-        var reloadedInner = Assert.Single(reloadedOutpost.Children!.Nodes);
-        Assert.Equal("Iron Ingot", reloadedInner.Name);
-        Assert.Equal("2", reloadedInner.Max);
+        var n = Assert.Single(reloaded.Root.Nodes);
+        Assert.Equal(new[] { "Rubber", "Modular Frame", "Screw" }, n.InputOrder);
+        Assert.Equal(new[] { "Heavy Modular Frame" }, n.OutputOrder);
+    }
+
+    [Fact]
+    public void Empty_port_order_is_omitted_from_json()
+    {
+        var doc = new FactoryDocument();
+        doc.Root.Nodes.Add(new FactoryNode { Name = "Iron Ingot" });
+        var entry = JsonNode.Parse(SfmdSerializer.Serialize(doc))!.AsObject()["Data"]!.AsArray()[0]!.AsObject();
+        Assert.False(entry.ContainsKey("InputOrder"));
+        Assert.False(entry.ContainsKey("OutputOrder"));
+    }
+
+    [Fact]
+    public void Outpost_membership_roundtrips_flat()
+    {
+        // Flat model: outpost + member in one list, membership via Parent (serialized by index).
+        var doc = new FactoryDocument();
+        var outpost = new FactoryNode { Name = "Outpost", Kind = NodeKind.Outpost };
+        var inner = new FactoryNode { Name = "Iron Ingot", Max = "2", Parent = outpost };
+        doc.Root.Nodes.Add(outpost);
+        doc.Root.Nodes.Add(inner);
+
+        var reloaded = SfmdSerializer.Deserialize(SfmdSerializer.Serialize(doc));
+        Assert.Equal(2, reloaded.Root.Nodes.Count);
+        var ro = reloaded.Root.Nodes.Single(n => n.Kind == NodeKind.Outpost);
+        var ri = reloaded.Root.Nodes.Single(n => n.Name == "Iron Ingot");
+        Assert.Same(ro, ri.Parent);
+        Assert.Equal("2", ri.Max);
+    }
+
+    [Fact]
+    public void Legacy_nested_outpost_save_migrates_to_flat()
+    {
+        // Old format: an outpost carries a nested "Data" array with locally-indexed Inputs.
+        // It must flatten into one list, set Parent, and remap the connection.
+        const string json = """
+            {"Version":"1.0","Data":[{"Name":"Outpost","X":0,"Y":0,"Data":[{"Name":"Limestone","X":0,"Y":0,"Max":"60"},{"Name":"Fine Concrete","X":10,"Y":0,"Inputs":{"Limestone":[0]}}]}]}
+            """;
+        var doc = SfmdSerializer.Deserialize(json);
+
+        Assert.Equal(3, doc.Root.Nodes.Count); // outpost + 2 members, flattened
+        var outpost = doc.Root.Nodes.Single(n => n.Kind == NodeKind.Outpost);
+        var concrete = doc.Root.Nodes.Single(n => n.Name == "Fine Concrete");
+        var limestone = doc.Root.Nodes.Single(n => n.Name == "Limestone");
+        Assert.Same(outpost, concrete.Parent);
+        Assert.Same(outpost, limestone.Parent);
+        var conn = Assert.Single(doc.Root.Connections);
+        Assert.Same(limestone, conn.From);
+        Assert.Same(concrete, conn.To);
+        Assert.Equal("Limestone", conn.Part);
+    }
+
+    [Fact]
+    public void Generator_node_roundtrips_as_a_unified_machine()
+    {
+        var doc = new FactoryDocument();
+        doc.Root.Nodes.Add(new FactoryNode { Name = "Fuel-Powered Generator", Kind = NodeKind.Generator, Max = "2" });
+
+        var reloaded = SfmdSerializer.Deserialize(SfmdSerializer.Serialize(doc));
+        var node = Assert.Single(reloaded.Root.Nodes);
+        Assert.Equal(NodeKind.Generator, node.Kind);
+        Assert.Equal("Fuel-Powered Generator", node.Name);
+        Assert.Equal("2", node.Max);
+    }
+
+    [Fact]
+    public void Legacy_import_export_handles_migrate_to_direct_connections()
+    {
+        // Superseded boundary model: miner (root) → Import handle → smelter (member). The handle
+        // is dropped and replaced by the direct miner → smelter connection it stood for, so the
+        // flat graph carries no Import/Export nodes.
+        const string json = """
+            {"Version":"1.0","Data":[
+              {"Name":"Iron Ore","X":0,"Y":0,"Max":"60"},
+              {"Name":"Outpost","X":50,"Y":0},
+              {"Name":"Iron Ore","X":40,"Y":0,"Kind":"Import","Parent":1,"Inputs":{"Iron Ore":[0]}},
+              {"Name":"Iron Ingot","X":80,"Y":0,"Parent":1,"Inputs":{"Iron Ore":[2]}}
+            ]}
+            """;
+        var doc = SfmdSerializer.Deserialize(json);
+
+        Assert.Equal(3, doc.Root.Nodes.Count); // miner, outpost, smelter — the handle is gone
+        var miner = doc.Root.Nodes.First(n => n.Name == "Iron Ore");
+        var smelter = doc.Root.Nodes.Single(n => n.Name == "Iron Ingot");
+        var conn = Assert.Single(doc.Root.Connections);
+        Assert.Same(miner, conn.From);
+        Assert.Same(smelter, conn.To);
+        Assert.Equal("Iron Ore", conn.Part);
+        Assert.Same(doc.Root.Nodes.Single(n => n.Kind == NodeKind.Outpost), smelter.Parent);
     }
 }

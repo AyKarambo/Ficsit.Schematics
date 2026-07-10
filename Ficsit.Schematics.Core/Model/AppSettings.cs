@@ -29,6 +29,18 @@ public sealed class AppSettings
     /// <summary>Connection style: Curves | Direct | 2D.</summary>
     public string Path { get; set; } = "Curves";
 
+    /// <summary>Colour each wire by the part it carries, so belts are traceable. Default on.</summary>
+    public bool WireColorByPart { get; set; } = true;
+
+    /// <summary>Hovering/selecting one machine fades everything but its connections. Default on.</summary>
+    public bool FocusHighlight { get; set; } = true;
+
+    /// <summary>
+    /// Flag connections whose solved flow exceeds the top belt (solids) or top pipe
+    /// (fluids) throughput with a warning glyph and red tint. Default on.
+    /// </summary>
+    public bool ShowBeltCapacityWarnings { get; set; } = true;
+
     /// <summary>Render the world map (with imported resource nodes) behind the canvas.</summary>
     public bool ShowMap { get; set; }
 
@@ -44,6 +56,74 @@ public sealed class AppSettings
     public Dictionary<string, NumberFormatSetting> Numbers { get; set; } = DefaultNumbers();
 
     public List<MachineDefaultSetting> MachineDefaults { get; set; } = [];
+
+    /// <summary>
+    /// Auto-planner: exclude manually gathered parts (Leaves, Wood, alien
+    /// remains, …) as raw inputs. Default on — plans should not invent free
+    /// hand-collected resources.
+    /// </summary>
+    public bool PlannerExcludeManualParts { get; set; } = true;
+
+    /// <summary>
+    /// Auto-planner: allow Converter ore-from-SAM conversion recipes. Default off
+    /// — they otherwise dominate "efficient" plans.
+    /// </summary>
+    public bool PlannerAllowOreConversion { get; set; }
+
+    /// <summary>
+    /// Auto-planner: recipes (by name) the user has disabled. The *disabled* set
+    /// is stored so recipes added by future data updates default to enabled.
+    /// </summary>
+    public List<string> PlannerDisabledRecipes { get; set; } = [];
+
+    /// <summary>
+    /// Auto-planner: the user's resource-preference budget — a slider position per
+    /// extractable raw (see <see cref="Planning.ScarcityWeights.WeightedResources"/>).
+    /// Empty means neutral: every raw equal, i.e. the built-in scarcity defaults
+    /// untouched. Only the relative split matters, so the values need not sum to any
+    /// particular total. This is the global default the Auto-Plan panel restores to.
+    /// </summary>
+    public Dictionary<string, int> PlannerResourcePreferences { get; set; } = [];
+
+    /// <summary>
+    /// Auto-planner: only use recipes unlocked up to this progression tier (phase),
+    /// so plans don't reach for machines the player hasn't built. 99 = no cap (all
+    /// tiers). The Auto-Plan picker writes this; it maps onto DisabledRecipes via
+    /// <see cref="Planning.FactoryPlanner.RecipesAboveTier"/>.
+    /// </summary>
+    public int PlannerMaxTierPhase { get; set; } = 99;
+
+    /// <summary>
+    /// Auto-planner: Somersloops the plan may spend on production amplification.
+    /// 0 = off (no amplification). The Auto-Plan panel writes this; it maps onto
+    /// <see cref="Planning.PlanRequest.SomersloopBudget"/>.
+    /// </summary>
+    public int PlannerSomersloopBudget { get; set; }
+
+    /// <summary>
+    /// Auto-planner: clock-fit mode (0 = None, 1 = Machines, 2 = Power). Default 0 (off).
+    /// Maps onto <see cref="Planning.FitMode"/> when the plan request is built.
+    /// </summary>
+    public int PlannerFitMode { get; set; }
+
+    /// <summary>
+    /// Auto-planner: the budget for the clock-fit (machine count or MW depending on
+    /// <see cref="PlannerFitMode"/>). Empty string = 0 (disabled). Stored as a string
+    /// to accept fractional budgets without a lossy float round-trip.
+    /// </summary>
+    public string PlannerFitBudget { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Auto-planner: skip the draft review and build straight onto the canvas when a
+    /// plan completes. Default off — plans are reviewed before they touch the canvas.
+    /// </summary>
+    public bool PlannerAutoApply { get; set; }
+
+    /// <summary>
+    /// Auto-planner: collapse each key-intermediate sub-chain into a named outpost when
+    /// a plan is applied, so a dense plan reads as a handful of blocks. Default on.
+    /// </summary>
+    public bool PlannerAutoCollapse { get; set; } = true;
 
     public static Dictionary<string, NumberFormatSetting> DefaultNumbers() => new()
     {

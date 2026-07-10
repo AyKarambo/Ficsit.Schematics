@@ -1,4 +1,5 @@
 using Ficsit.Schematics.Canvas;
+using Ficsit.Schematics.Core.Editing;
 using Ficsit.Schematics.Core.GameData;
 using Ficsit.Schematics.Core.Model;
 using Ficsit.Schematics.Core.Numerics;
@@ -8,16 +9,82 @@ namespace Ficsit.Schematics;
 /// <summary>Machine editor popover and the inline limit editor.</summary>
 public partial class MainPage
 {
+    // Docked right-side panel geometry: WidthRequest + outer Margins (12,60,12,12).
+    private const float MachinePanelWidth = 300f;
+    private const float MachinePanelMargin = 12f;
+    private const float MachinePanelTop = 60f;
+    // Keep this much empty canvas between a node and the panel's left edge.
+    private const float NodeRevealMargin = 24f;
+
     private void ShowMachinePopup(FactoryNode node, PointF screen)
     {
-        CloseOverlays();
+        var wasOpen = MachinePopup.IsVisible;
+        if (!wasOpen) CloseOverlays();
         _popupNode = node;
         PopulateMachinePopup(node);
-
-        var position = ClampToPage(screen, 290, 430);
-        MachinePopup.TranslationX = position.X;
-        MachinePopup.TranslationY = position.Y;
         MachinePopup.IsVisible = true;
+        EnsureNodeClearOfPanel(node);
+    }
+
+    /// <summary>
+    /// Live retarget: while the docked editor is open, selecting a different single
+    /// node rebinds the panel to it (re-populate + re-pan) without closing.
+    /// </summary>
+    private void RetargetMachinePopup()
+    {
+        if (!MachinePopup.IsVisible) return;
+        // Empty canvas click (or entering an outpost) clears the selection → close.
+        if (_state.Selection.Count == 0)
+        {
+            MachinePopup.IsVisible = false;
+            _popupNode = null;
+            return;
+        }
+        if (_state.Selection.Count != 1) return;
+        var node = _state.Selection[0];
+        if (node == _popupNode) return;
+        ShowMachinePopup(node, default);
+    }
+
+    /// <summary>
+    /// Auto-pan so <paramref name="node"/> is never hidden under the docked editor
+    /// panel: if the node's screen rect intersects the panel's screen rect, shift
+    /// the view by the minimum delta to bring it fully into the region left of the
+    /// panel (plus a small margin). No-op if the node already fits.
+    /// </summary>
+    private void EnsureNodeClearOfPanel(FactoryNode node)
+    {
+        if (!_drawable.Layouts.TryGetValue(node, out var layout)) return;
+
+        var pageW = (float)Width;
+        var pageH = (float)Height;
+        if (pageW <= 0 || pageH <= 0) return;
+
+        // Node's on-screen rect from its world bounds.
+        var topLeft = _drawable.WorldToScreen(new PointF(layout.Bounds.Left, layout.Bounds.Top));
+        var bottomRight = _drawable.WorldToScreen(new PointF(layout.Bounds.Right, layout.Bounds.Bottom));
+        var nodeRect = new RectF(topLeft.X, topLeft.Y,
+            bottomRight.X - topLeft.X, bottomRight.Y - topLeft.Y);
+
+        // Panel's on-screen rect (anchored End, full-ish height).
+        var panelLeft = pageW - MachinePanelMargin - MachinePanelWidth;
+        var panelRect = new RectF(panelLeft, MachinePanelTop,
+            MachinePanelWidth + MachinePanelMargin, pageH - MachinePanelTop);
+
+        if (!nodeRect.IntersectsWith(panelRect)) return;
+
+        // Minimum horizontal shift to push the node's right edge left of the panel.
+        var dx = panelLeft - NodeRevealMargin - nodeRect.Right;
+        // Don't shove the node off the left edge; clamp so its left stays visible.
+        if (nodeRect.Left + dx < NodeRevealMargin)
+            dx = NodeRevealMargin - nodeRect.Left;
+
+        // Vertical nudge only if the node sits above the panel's top band.
+        float dy = 0;
+        if (nodeRect.Top < MachinePanelTop)
+            dy = MachinePanelTop + NodeRevealMargin - nodeRect.Top;
+
+        _controller.PanBy(dx, dy);
     }
 
     private void PopulateMachinePopup(FactoryNode node)
@@ -60,6 +127,8 @@ public partial class MainPage
         PopupSloopRow.IsVisible = machine is { MaxProductionShards: > 0 };
         if (PopupSloopRow.IsVisible)
             PopupSloopValue.Text = $"{node.Somersloops} / {machine!.MaxProductionShards}";
+
+        PopupCopySetupRow.IsVisible = isRecipe;
 
         PopupAutoRoundRow.IsVisible = isRecipe;
         PopupAutoRoundSwitch.IsToggled = node.AutoRound;
@@ -154,6 +223,51 @@ public partial class MainPage
         _popupNode = null;
     }
 
+    // -------------------------------------------------- port context menu
+
+    private FactoryNode? _portMenuNode;
+    private PortInfo? _portMenuPort;
+
+    /// <summary>Right-click on a connected port: float a one-item "clear connections" menu.</summary>
+    private void ShowPortMenu(FactoryNode node, PortInfo port, PointF screen)
+    {
+        _portMenuNode = node;
+        _portMenuPort = port;
+        var pos = ClampToPage(screen, 170, 40);
+        PortMenu.TranslationX = pos.X;
+        PortMenu.TranslationY = pos.Y;
+        PortMenu.IsVisible = true;
+    }
+
+    private void OnPortMenuClear(object? sender, EventArgs e)
+    {
+        PortMenu.IsVisible = false;
+        if (_portMenuNode is not null && _portMenuPort is not null)
+            _controller.ClearPortConnections(_portMenuNode, _portMenuPort);
+        _portMenuNode = null;
+        _portMenuPort = null;
+    }
+
+    private void ShowSelectionMenu(IReadOnlyList<FactoryNode> nodes, PointF screen)
+    {
+        var pos = ClampToPage(screen, 170, 76);
+        SelectionMenu.TranslationX = pos.X;
+        SelectionMenu.TranslationY = pos.Y;
+        SelectionMenu.IsVisible = true;
+    }
+
+    private void OnSelectionMenuFormat(object? sender, EventArgs e)
+    {
+        SelectionMenu.IsVisible = false;
+        _controller.FormatSelection();
+    }
+
+    private void OnSelectionMenuGroup(object? sender, EventArgs e)
+    {
+        SelectionMenu.IsVisible = false;
+        _controller.GroupSelection();
+    }
+
     private void OnPopupTitleCompleted(object? sender, EventArgs e)
     {
         if (_popupNode is null) return;
@@ -170,14 +284,23 @@ public partial class MainPage
             PopupClockEntry.Text = TrimNumber((_popupNode.ClockSpeed * 100).ToDecimalString(4, RoundingMode.Nearest));
     }
 
-    private void OnClockStepDown(object? sender, EventArgs e) => StepClock(roundCountUp: true);
+    // Off-state clock stepper increment, in percentage points.
+    private const int ClockStepPercent = 10;
 
-    private void OnClockStepUp(object? sender, EventArgs e) => StepClock(roundCountUp: false);
+    private void OnClockStepDown(object? sender, EventArgs e) => StepClock(-1);
 
-    private void StepClock(bool roundCountUp)
+    private void OnClockStepUp(object? sender, EventArgs e) => StepClock(+1);
+
+    /// <summary>Auto-Round OFF: nudge the clock by a fixed increment, clamped to the game's
+    /// (1%, 250%] range. Works regardless of the solved count (including an unconnected node
+    /// at count 0), unlike the old whole-machine rounding which no-opped there.</summary>
+    private void StepClock(int direction)
     {
         if (_popupNode is null) return;
-        _state.Editor.StepClockToWholeMachines(_popupNode, roundCountUp);
+        var newClock = _popupNode.ClockSpeed + new Rational(direction * ClockStepPercent, 100);
+        if (newClock < FactoryNode.MinClockSpeed) newClock = FactoryNode.MinClockSpeed;
+        if (newClock > FactoryNode.MaxClockSpeed) newClock = FactoryNode.MaxClockSpeed;
+        _state.Editor.SetClockSpeed(_popupNode, newClock);
         PopupClockEntry.Text = TrimNumber((_popupNode.ClockSpeed * 100).ToDecimalString(4, RoundingMode.Nearest));
     }
 
@@ -191,11 +314,9 @@ public partial class MainPage
     private void StepMachineCount(int delta)
     {
         if (_popupNode is null) return;
-        var (workload, count) = AutoRoundState(_popupNode);
-        var target = count + delta;
-        if (!CanStepTo(workload, target)) return;
-        // Stable: re-solving gives ceil(W / (W/N')) == N'. Undoable via SetProperty.
-        _state.Editor.SetClockSpeed(_popupNode, workload / target);
+        // The editor holds the throughput constant and moves a count-display Max alongside the
+        // clock so a limited node's machine count actually changes (not its output).
+        _state.Editor.StepAutoRound(_popupNode, delta);
     }
 
     /// <summary>
@@ -243,6 +364,75 @@ public partial class MainPage
         var value = Math.Clamp(_popupNode.Somersloops + delta, 0, machine.MaxProductionShards);
         _state.Editor.SetProperty(_popupNode, "Somersloop", n => n.Somersloops, (n, v) => n.Somersloops = v, value);
         PopupSloopValue.Text = $"{_popupNode.Somersloops} / {machine.MaxProductionShards}";
+    }
+
+    // ------------------------------------------------------- copy-clock handlers
+
+    private void OnCopyClockClicked(object? sender, EventArgs e)
+    {
+        if (_popupNode is null) return;
+        var clockText = ClockClipboard.FormatClockPercent(_popupNode.ClockSpeed);
+        _ = CopyClockToClipboardAsync(clockText);
+    }
+
+    private void OnCopyAutoClockClicked(object? sender, EventArgs e)
+    {
+        if (_popupNode is null) return;
+        var (workload, count) = AutoRoundState(_popupNode);
+        if (!workload.IsPositive) return;
+        var clockText = ClockClipboard.FormatClockPercent(workload / count);
+        _ = CopyClockToClipboardAsync(clockText);
+    }
+
+    private async Task CopyClockToClipboardAsync(string clockText)
+    {
+        await Clipboard.SetTextAsync(clockText + "%");
+        ShowCopyToast($"Copied {clockText}%");
+    }
+
+    private void OnCopySetupClicked(object? sender, EventArgs e)
+    {
+        if (_popupNode is null) return;
+        var machine = MachineFor(_popupNode);
+        var machineName = machine?.Name ?? _popupNode.Name;
+        var recipeName = _loc.L(_popupNode.Name);
+
+        string clockText;
+        string countStr;
+        if (_popupNode.AutoRound)
+        {
+            var (workload, count) = AutoRoundState(_popupNode);
+            clockText = workload.IsPositive
+                ? ClockClipboard.FormatClockPercent(workload / count)
+                : ClockClipboard.FormatClockPercent(_popupNode.ClockSpeed);
+            countStr = workload.IsPositive ? count.Ceiling().ToString() : "?";
+        }
+        else
+        {
+            clockText = ClockClipboard.FormatClockPercent(_popupNode.ClockSpeed);
+            countStr = "1";
+        }
+
+        var sloopPart = machine is { MaxProductionShards: > 0 } && _popupNode.Somersloops > 0
+            ? $" · {_popupNode.Somersloops} Somersloop{(_popupNode.Somersloops == 1 ? "" : "s")}"
+            : string.Empty;
+
+        var summary = $"{machineName} · {recipeName} · ×{countStr} @ {clockText}%{sloopPart}";
+        _ = CopySetupToClipboardAsync(summary);
+    }
+
+    private async Task CopySetupToClipboardAsync(string summary)
+    {
+        await Clipboard.SetTextAsync(summary);
+        ShowCopyToast("Copied setup");
+    }
+
+    private void ShowCopyToast(string message)
+    {
+        CopyClockToastLabel.Text = message;
+        CopyClockToast.IsVisible = true;
+        Dispatcher.DispatchDelayed(TimeSpan.FromMilliseconds(1500), () =>
+            CopyClockToast.IsVisible = false);
     }
 
     private void OnAutoRoundToggled(object? sender, ToggledEventArgs e)
@@ -299,8 +489,10 @@ public partial class MainPage
 
     private void OnPasteClicked(object? sender, EventArgs e)
     {
-        var screen = new PointF((float)MachinePopup.TranslationX, (float)MachinePopup.TranslationY);
-        var world = _drawable.ScreenToWorld(screen);
+        // Offset from the edited node when present, else the viewport centre.
+        var world = _popupNode is not null && _drawable.Layouts.TryGetValue(_popupNode, out var layout)
+            ? new PointF(layout.Bounds.Left, layout.Bounds.Top)
+            : _drawable.ScreenToWorld(new PointF((float)Width / 2, (float)Height / 2));
         var pasted = _state.Editor.Paste(world.X + 30, world.Y + 30);
         _state.SetSelection(pasted);
         MachinePopup.IsVisible = false;

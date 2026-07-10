@@ -12,7 +12,7 @@ namespace Ficsit.Schematics.Canvas;
 /// popups, wheel = zoom around the cursor. Deletion is deliberate only — Delete
 /// key or the editor popover, never an accidental double-click.
 /// </summary>
-public sealed class CanvasController(AppState state, FactoryCanvasDrawable drawable)
+public sealed partial class CanvasController(AppState state, FactoryCanvasDrawable drawable)
 {
     private enum Mode { Idle, Pressed, Pan, DragNodes, Connect, RubberBand }
 
@@ -23,6 +23,15 @@ public sealed class CanvasController(AppState state, FactoryCanvasDrawable drawa
     private FactoryNode? _pressNode;
     private PortInfo? _pressPort;
     private NodeConnection? _detachedConnection;
+
+    // Port reorder: active while a port drag stays within its own side's column.
+    private bool _reorderActive;
+    private int _reorderIndex;
+
+    // Phase 3 "drag out of a resource node": the free marker pressed on empty canvas,
+    // and the extractor created from it once the drag starts.
+    private ResourceNodeInfo? _pressMarker;
+    private FactoryNode? _dragOutNode;
     private DateTime _lastClickTime = DateTime.MinValue;
     private PointF _lastClickPoint;
     private FactoryNode? _lastClickNode;
@@ -30,30 +39,63 @@ public sealed class CanvasController(AppState state, FactoryCanvasDrawable drawa
     public event Action<PointF>? OpenRecipeChooser;        // screen position
     public event Action<PortDragContext, PointF>? OpenChooserForPort;
     public event Action<FactoryNode, PointF>? OpenMachinePopup;
+    public event Action<FactoryNode, PortInfo, PointF>? OpenPortMenu;
+    public event Action<IReadOnlyList<FactoryNode>, PointF>? OpenSelectionMenu; // right-click on a multi-selection
     public event Action<FactoryNode>? EnterOutpostRequested;
     public event Action<FactoryNode, NodeLayout>? EditLimitRequested;
     public event Action? Invalidate;
-    public event Action? CloseOverlays;
+    // Press-time close: dismisses the transient panels (chooser, settings, …) but
+    // leaves the docked machine editor for the click/selection logic to retarget.
+    public event Action? CloseTransientOverlays;
 
     private float DragThreshold => Math.Max(2, state.Settings.DragSensitivity / 4f);
+
+    /// <summary>Screen margin at the left/right edges that, inside an outpost, turns a port-drag
+    /// release into a connection to the outer world (left = fed from outside, right = sent out).</summary>
+    private const float EdgeZonePx = 90f;
+
+    /// <summary>Which edge rail a port-drag is over: true = left (input side), false = right
+    /// (output side), null = none. Only inside an outpost, dragging a concrete machine port
+    /// toward its matching side.</summary>
+    private bool? EdgeZoneFor(PointF screen)
+    {
+        if (state.Editor.ActiveOutpost is null || _pressPort is null
+            || _pressPort.Part == "AnyPart" || _dragOutNode is not null) return null;
+        if (_pressNode is null || _pressNode.Kind is NodeKind.Outpost or NodeKind.Blueprint) return null;
+        if (_pressPort.IsInput && screen.X <= EdgeZonePx) return true;
+        if (!_pressPort.IsInput && screen.X >= drawable.ViewportWidth - EdgeZonePx) return false;
+        return null;
+    }
+
+    /// <summary>True while a pan/drag/connect/rubber-band gesture is in flight. Lets the host
+    /// skip the per-move status recompute (full node walk) until the gesture ends.</summary>
+    public bool IsInteracting => _mode is Mode.Pan or Mode.DragNodes or Mode.Connect or Mode.RubberBand;
 
     // ---------------------------------------------------------------- pressed
 
     public void PointerPressed(PointF screen, bool isRight, bool ctrl)
     {
-        CloseOverlays?.Invoke();
+        CloseTransientOverlays?.Invoke();
         _pressScreen = _lastScreen = screen;
         _pressWasRight = isRight;
         var world = drawable.ScreenToWorld(screen);
         (_pressNode, var layout) = HitNode(world);
         _pressPort = layout?.HitPort(world);
         _detachedConnection = null;
+        _pressMarker = null;
+        _dragOutNode = null;
+        _reorderActive = false;
         _mode = Mode.Pressed;
+
+        // Drag-out-of-a-resource-node: an empty press over a free marker arms the
+        // gesture without disturbing pan-on-drag for misses.
+        if (!isRight && _pressNode is null && _pressPort is null && drawable.MapActive)
+            _pressMarker = FreeMarkerAt(world);
 
         if (!isRight && _pressPort is { IsInput: true } inputPort && _pressNode is not null)
         {
             // Re-drag an existing single connection to detach it.
-            var existing = state.Editor.CurrentScope
+            var existing = state.Editor.Graph
                 .IncomingTo(_pressNode, inputPort.Part).ToList();
             if (existing.Count == 1)
                 _detachedConnection = existing[0];
@@ -71,6 +113,8 @@ public sealed class CanvasController(AppState state, FactoryCanvasDrawable drawa
             {
                 if (_pressWasRight)
                     _mode = Mode.RubberBand;
+                else if (_pressMarker is not null && TryBeginDragOut(_pressMarker))
+                    _mode = Mode.Connect;
                 else if (_pressPort is not null)
                     _mode = Mode.Connect;
                 else if (_pressNode is not null)
@@ -101,16 +145,32 @@ public sealed class CanvasController(AppState state, FactoryCanvasDrawable drawa
                 {
                     state.Editor.MoveNodes(state.Selection, dx, dy);
                     drawable.InvalidateLayouts();
-                    Invalidate?.Invoke();
                 }
+                UpdateSnapPreview(world);
+                Invalidate?.Invoke();
                 break;
 
             case Mode.Connect:
-                var anchorLayout = _pressNode is not null ? GetLayout(_pressNode) : null;
-                var anchor = anchorLayout is not null && _pressPort is not null
-                    ? drawable.WorldToScreen(anchorLayout.PortAnchor(_pressPort))
-                    : _pressScreen;
-                drawable.PendingWire = (anchor, screen);
+                // Staying within the pressed port's own side reorders it; otherwise it's a
+                // connection drag (pending wire).
+                if (_dragOutNode is null && TryReorderHint(world, out var insertLine))
+                {
+                    _reorderActive = true;
+                    drawable.PortInsertLine = insertLine;
+                    drawable.PendingWire = null;
+                    drawable.EdgeDropZone = null;
+                }
+                else
+                {
+                    _reorderActive = false;
+                    drawable.PortInsertLine = null;
+                    var anchorLayout = _pressNode is not null ? GetLayout(_pressNode) : null;
+                    var anchor = anchorLayout is not null && _pressPort is not null
+                        ? drawable.WorldToScreen(anchorLayout.PortAnchor(_pressPort))
+                        : _pressScreen;
+                    drawable.PendingWire = (anchor, screen);
+                    drawable.EdgeDropZone = EdgeZoneFor(screen);
+                }
                 Invalidate?.Invoke();
                 break;
 
@@ -132,6 +192,7 @@ public sealed class CanvasController(AppState state, FactoryCanvasDrawable drawa
         var world = drawable.ScreenToWorld(screen);
         var mode = _mode;
         _mode = Mode.Idle;
+        _pressMarker = null;
 
         switch (mode)
         {
@@ -140,14 +201,23 @@ public sealed class CanvasController(AppState state, FactoryCanvasDrawable drawa
                 break;
 
             case Mode.DragNodes:
+                drawable.SnapPreviewMarker = null;
                 state.Editor.Commands.BreakCoalescing();
                 SnapSelectionToGrid();
-                SnapToResourceNode();
+                SnapToResourceNode(world);
                 break;
 
             case Mode.Connect:
                 drawable.PendingWire = null;
-                CompleteConnection(world, screen);
+                drawable.PortInsertLine = null;
+                drawable.EdgeDropZone = null;
+                if (_reorderActive)
+                    CommitReorder();
+                else if (_dragOutNode is not null)
+                    CompleteDragOut(world, screen);
+                else
+                    CompleteConnection(world, screen);
+                _reorderActive = false;
                 break;
 
             case Mode.RubberBand:
@@ -183,6 +253,21 @@ public sealed class CanvasController(AppState state, FactoryCanvasDrawable drawa
 
         if (isRight)
         {
+            // A right-click on a connected port offers "clear connection(s)"; an unconnected
+            // port (or the node body) falls through to the machine editor.
+            var rightPort = layout?.HitPort(world);
+            if (node is not null && rightPort is not null && PortHasConnections(node, rightPort))
+            {
+                OpenPortMenu?.Invoke(node, rightPort, screen);
+                return;
+            }
+            // Right-clicking a node that's part of a multi-selection offers group
+            // actions ("Format selection"); a single node falls through to its editor.
+            if (node is not null && state.Selection.Count >= 2 && state.Selection.Contains(node))
+            {
+                OpenSelectionMenu?.Invoke(state.Selection.ToList(), screen);
+                return;
+            }
             if (node is not null)
             {
                 if (!state.Selection.Contains(node))
@@ -239,318 +324,24 @@ public sealed class CanvasController(AppState state, FactoryCanvasDrawable drawa
             ? state.Selection.Where(n => n != node).ToList()
             : state.Selection.Append(node).ToList();
 
-    // ------------------------------------------------------------ connections
+    // -------------------------------------------------------------- cancel
 
-    private void CompleteConnection(PointF world, PointF screen)
+    /// <summary>Esc / cancel during a drag-out removes the just-created extractor as one step.</summary>
+    public void Cancel()
     {
-        if (_pressNode is null || _pressPort is null) return;
-
-        var (targetNode, targetLayout) = HitNode(world);
-        var targetPort = targetLayout?.HitPort(world);
-
-        if (_detachedConnection is not null)
+        if (_mode == Mode.Connect && _dragOutNode is not null)
         {
-            // Re-drag: dropping on a new valid input moves the connection; empty deletes it.
-            var moved = TryResolveEndpoints(_detachedConnection.From,
-                new PortInfo(_detachedConnection.Part, RectF.Zero, false),
-                targetNode, targetPort, out var from, out var part, out var to);
-            state.Editor.Disconnect(_detachedConnection);
-            if (moved && to != _detachedConnection.To)
-                state.Editor.Connect(from!, part!, to!);
-            drawable.InvalidateLayouts();
-            return;
+            state.Editor.Commands.CancelGroup();
+            state.ClearSelection();
+            _dragOutNode = null;
         }
-
-        if (targetNode is null)
-        {
-            // Dropped on empty canvas: offer compatible recipes for this port.
-            OpenChooserForPort?.Invoke(
-                new PortDragContext(_pressNode, _pressPort.Part, !_pressPort.IsInput), screen);
-            return;
-        }
-        if (targetNode == _pressNode) return;
-        if (TryResolveEndpoints(_pressNode, _pressPort, targetNode, targetPort, out var fromNode, out var partName, out var toNode))
-        {
-            state.Editor.Connect(fromNode!, partName!, toNode!);
-            drawable.InvalidateLayouts();
-        }
-    }
-
-    /// <summary>
-    /// Works out producer/part/consumer from a drag between two nodes, allowing
-    /// either direction and letting specialty machines adopt the dragged part.
-    /// </summary>
-    private bool TryResolveEndpoints(
-        FactoryNode pressNode, PortInfo pressPort,
-        FactoryNode? targetNode, PortInfo? targetPort,
-        out FactoryNode? from, out string? part, out FactoryNode? to)
-    {
-        from = null; part = null; to = null;
-        if (targetNode is null) return false;
-
-        var pressIsOutput = !pressPort.IsInput;
-        var pressPart = pressPort.Part;
-
-        if (pressIsOutput)
-        {
-            from = pressNode;
-            to = targetNode;
-            part = pressPart != "AnyPart" ? pressPart : targetPort?.Part;
-        }
-        else
-        {
-            from = targetNode;
-            to = pressNode;
-            part = pressPart != "AnyPart" ? pressPart : targetPort?.Part;
-        }
-
-        if (part is null or "AnyPart") return false;
-        var resolvedPart = part;
-
-        // The consumer must accept the part: recipes need a matching input;
-        // specialty machines accept anything.
-        if (to!.Kind == NodeKind.Recipe)
-        {
-            if (!state.Data.RecipesByName.TryGetValue(to.Name, out var recipe)
-                || recipe.Inputs.All(i => i.Part != resolvedPart))
-                return false;
-        }
-        if (from!.Kind == NodeKind.Recipe)
-        {
-            if (!state.Data.RecipesByName.TryGetValue(from.Name, out var recipe)
-                || recipe.Outputs.All(o => o.Part != resolvedPart))
-                return false;
-        }
-        return from != to;
-    }
-
-    // ------------------------------------------------------------------- misc
-
-    public void Wheel(PointF screen, int delta)
-        => ZoomAround(screen, (float)Math.Pow(1.1, delta / 120.0));
-
-    public void ZoomAround(PointF screen, float factor)
-    {
-        var newZoom = Math.Clamp(drawable.Zoom * factor, 0.1f, 5f);
-        var world = drawable.ScreenToWorld(screen);
-        drawable.Zoom = newZoom;
-        drawable.PanX = screen.X - world.X * newZoom;
-        drawable.PanY = screen.Y - world.Y * newZoom;
-        SyncPanToDocument();
+        _mode = Mode.Idle;
+        _pressMarker = null;
+        _reorderActive = false;
+        drawable.PendingWire = null;
+        drawable.PortInsertLine = null;
+        drawable.SnapPreviewMarker = null;
+        drawable.RubberBand = null;
         Invalidate?.Invoke();
-    }
-
-    /// <summary>Frame all machines in the viewport (toolbar "fit" and Ctrl+0).</summary>
-    public void ZoomToFit(SizeF viewport)
-    {
-        var layouts = drawable.Layouts.Values.ToList();
-        if (layouts.Count == 0 || viewport.Width <= 0 || viewport.Height <= 0)
-        {
-            drawable.Zoom = 1f;
-            drawable.PanX = viewport.Width / 2;
-            drawable.PanY = viewport.Height / 2;
-        }
-        else
-        {
-            var bounds = layouts[0].Bounds;
-            foreach (var layout in layouts.Skip(1))
-                bounds = bounds.Union(layout.Bounds);
-            bounds = bounds.Inflate(60, 60);
-            var zoom = Math.Clamp(Math.Min(viewport.Width / bounds.Width, viewport.Height / bounds.Height), 0.1f, 1.5f);
-            drawable.Zoom = zoom;
-            drawable.PanX = viewport.Width / 2 - bounds.Center.X * zoom;
-            drawable.PanY = viewport.Height / 2 - bounds.Center.Y * zoom;
-        }
-        SyncPanToDocument();
-        Invalidate?.Invoke();
-    }
-
-    /// <summary>Delete the current selection (Delete key / editor popover).</summary>
-    public void DeleteSelection()
-    {
-        if (state.Selection.Count == 0) return;
-        state.Editor.DeleteNodes(state.Selection.ToList());
-        state.ClearSelection();
-        drawable.InvalidateLayouts();
-        Invalidate?.Invoke();
-    }
-
-    private void SyncPanToDocument()
-    {
-        // Outposts remember their own view; the root view lives on the document.
-        if (state.Editor.ScopePath.Count > 0)
-        {
-            var outpost = state.Editor.ScopePath[^1];
-            outpost.InnerZoom = drawable.Zoom;
-            outpost.InnerPanX = drawable.PanX;
-            outpost.InnerPanY = drawable.PanY;
-        }
-        else
-        {
-            var doc = state.Editor.Document;
-            doc.Zoom = drawable.Zoom;
-            doc.PanX = drawable.PanX;
-            doc.PanY = drawable.PanY;
-        }
-    }
-
-    /// <summary>
-    /// Map mode: a dropped extractor latches onto the nearest free, compatible
-    /// resource node — the marker's purity is applied as the machine capacity.
-    /// Dragging it away again releases the node.
-    /// </summary>
-    private void SnapToResourceNode()
-    {
-        if (!state.Settings.ShowMap || state.Editor.ScopePath.Count > 0) return;
-        if (state.Selection.Count != 1) return;
-        var node = state.Selection[0];
-        if (node.Kind != NodeKind.Recipe) return;
-
-        var center = NodeCenter(node);
-        ResourceNodeInfo? best = null;
-        var bestDistance = MapGeometry.SnapRadius;
-        var occupied = state.OccupiedResourceNodes();
-        foreach (var candidate in state.MapNodes)
-        {
-            if (!MatchesMapNode(node, candidate)) continue;
-            if (occupied.Contains(candidate.Instance) && node.ResourceNodeId != candidate.Instance) continue;
-            var p = MapGeometry.ToCanvas(candidate.X, candidate.Y);
-            var d = (float)Math.Sqrt((p.X - center.X) * (p.X - center.X) + (p.Y - center.Y) * (p.Y - center.Y));
-            if (d < bestDistance)
-            {
-                bestDistance = d;
-                best = candidate;
-            }
-        }
-
-        if (best is null)
-        {
-            if (node.ResourceNodeId is not null)
-                state.Editor.SetProperty(node, "Release node", n => n.ResourceNodeId, (n, v) => n.ResourceNodeId = v, (string?)null);
-            return;
-        }
-
-        var marker = MapGeometry.ToCanvas(best.X, best.Y);
-        state.Editor.MoveNodes([node],
-            marker.X - NodeLayout.CardWidth / 2 - node.X,
-            marker.Y - NodeLayout.ImageAreaHeight / 2 - node.Y,
-            coalesce: false);
-        if (node.ResourceNodeId != best.Instance)
-            state.Editor.SetProperty(node, "Snap to node", n => n.ResourceNodeId, (n, v) => n.ResourceNodeId = v, (string?)best.Instance);
-
-        // Adopt the node's purity when the machine family has purity capacities.
-        if (state.Data.RecipesByName.TryGetValue(node.Name, out var recipe))
-        {
-            var family = state.Data.MultiMachineFor(recipe.Machine);
-            if (family is not null && family.Capacities.Any(c => c.Name == best.Purity))
-                state.Editor.SetProperty(node, "Purity", n => n.Capacity, (n, v) => n.Capacity = v, (string?)best.Purity);
-        }
-        drawable.InvalidateLayouts();
-    }
-
-    /// <summary>Can this recipe machine sit on that map resource node?</summary>
-    private bool MatchesMapNode(FactoryNode node, ResourceNodeInfo map)
-    {
-        if (!state.Data.RecipesByName.TryGetValue(node.Name, out var recipe)) return false;
-        var family = state.Data.MultiMachineFor(recipe.Machine)?.Name ?? recipe.Machine;
-        return map.Kind switch
-        {
-            ResourceNodeKind.Geyser => family == "Geothermal Generator",
-            ResourceNodeKind.FrackingCore => recipe.Machine == "Resource Well Pressurizer",
-            ResourceNodeKind.FrackingSatellite => recipe.Machine == "Resource Well Extractor"
-                && recipe.Outputs.Any(o => o.Part == map.Part),
-            _ => (family == "Miner" || recipe.Machine == "Oil Extractor")
-                && recipe.Outputs.Any(o => o.Part == map.Part),
-        };
-    }
-
-    private PointF NodeCenter(FactoryNode node)
-        => drawable.Layouts.TryGetValue(node, out var layout)
-            ? layout.Bounds.Center
-            : new PointF((float)node.X + NodeLayout.CardWidth / 2, (float)node.Y + NodeLayout.ImageAreaHeight / 2);
-
-    private void SnapSelectionToGrid()
-    {
-        if (!state.Settings.UseBuildingGrid) return;
-        if (!double.TryParse(state.Settings.BuildingGridX, out var gx) || gx <= 0) return;
-        if (!double.TryParse(state.Settings.BuildingGridY, out var gy) || gy <= 0) return;
-        foreach (var node in state.Selection)
-        {
-            var snappedX = Math.Round(node.X / gx) * gx;
-            var snappedY = Math.Round(node.Y / gy) * gy;
-            state.Editor.MoveNodes([node], snappedX - node.X, snappedY - node.Y, coalesce: true);
-        }
-        state.Editor.Commands.BreakCoalescing();
-        drawable.InvalidateLayouts();
-    }
-
-    private (FactoryNode?, NodeLayout?) HitNode(PointF world)
-    {
-        // Topmost = last in list (drawn last).
-        foreach (var node in state.Editor.CurrentScope.Nodes.AsEnumerable().Reverse())
-        {
-            if (!drawable.Layouts.TryGetValue(node, out var layout)) continue;
-            var expanded = layout.Bounds;
-            expanded = new RectF(expanded.X - NodeLayout.PortSize, expanded.Y,
-                expanded.Width + 2 * NodeLayout.PortSize, expanded.Height);
-            if (expanded.Contains(world) && (layout.Bounds.Contains(world) || layout.HitPort(world) is not null))
-                return (node, layout);
-        }
-        return (null, null);
-    }
-
-    private NodeConnection? HitConnectionLabel(PointF world)
-        => state.Editor.CurrentScope.Connections
-            .FirstOrDefault(c => drawable.ConnectionLabelRect(c).Contains(world));
-
-    private NodeLayout? GetLayout(FactoryNode node)
-        => drawable.Layouts.GetValueOrDefault(node);
-
-    /// <summary>Hover support for tooltips: what is under the cursor.</summary>
-    public string? TooltipTextAt(PointF screen, NumberFormatService numbers, LocalizationService loc)
-    {
-        var world = drawable.ScreenToWorld(screen);
-        var (node, layout) = HitNode(world);
-        if (node is not null && layout is not null)
-        {
-            var result = state.Editor.Result.For(node);
-            if (layout.HasValueRow && layout.ValueRect.Contains(world))
-            {
-                var machineName = node.Kind == NodeKind.Recipe
-                    && state.Data.RecipesByName.TryGetValue(node.Name, out var recipe)
-                        ? loc.L(recipe.Machine)
-                        : loc.L(node.Name);
-                return result.IsPpmDisplay
-                    ? $"{numbers.ValueTooltip(result.DisplayValue)} {loc.L("PER_MINUTE")}"
-                    : $"{numbers.ValueTooltip(result.DisplayValue)} {machineName}";
-            }
-            var port = layout.HitPort(world);
-            if (port is not null)
-            {
-                var ports = port.IsInput ? result.Inputs : result.Outputs;
-                if (ports.TryGetValue(port.Part, out var portResult))
-                    return $"{loc.L(port.Part)}: {numbers.ValueTooltip(portResult.Target)} {loc.L("PER_MINUTE")}";
-                return loc.L(port.Part);
-            }
-        }
-        var connection = HitConnectionLabel(world);
-        if (connection is not null)
-        {
-            var flow = state.Editor.Result.FlowOf(connection);
-            return $"{loc.L(connection.Part)}: {numbers.ValueTooltip(flow)} {loc.L("PER_MINUTE")}";
-        }
-
-        // Map mode: hovering a resource node shows what it is and who uses it.
-        var mapNode = drawable.HitMapNode(world);
-        if (mapNode is not null)
-        {
-            var label = $"{loc.L(mapNode.Part)} · {loc.L(mapNode.Purity)}";
-            var occupant = state.OccupantOf(mapNode.Instance);
-            if (occupant is null)
-                return $"{label} — {loc.L("UNUSED")}";
-            var rate = state.Editor.Result.For(occupant).DisplayValue;
-            return $"{label} — {loc.L(occupant.Name)}: {numbers.Value(rate)}/min";
-        }
-        return null;
     }
 }

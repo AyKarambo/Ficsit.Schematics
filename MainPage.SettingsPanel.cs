@@ -67,6 +67,31 @@ public partial class MainPage
         Canvas.Invalidate();
     }
 
+    private void OnColorWiresToggled(object? sender, ToggledEventArgs e)
+    {
+        if (_initializing) return;
+        _state.Settings.WireColorByPart = e.Value;
+        _state.SaveSettings();
+        Canvas.Invalidate();
+    }
+
+    private void OnFocusHighlightToggled(object? sender, ToggledEventArgs e)
+    {
+        if (_initializing) return;
+        _state.Settings.FocusHighlight = e.Value;
+        _state.SaveSettings();
+        Canvas.Invalidate();
+    }
+
+    private void OnBeltCapacityWarningsToggled(object? sender, ToggledEventArgs e)
+    {
+        if (_initializing) return;
+        _state.Settings.ShowBeltCapacityWarnings = e.Value;
+        _state.SaveSettings();
+        UpdateStatus();
+        Canvas.Invalidate();
+    }
+
     private void OnMultiplierChanged(object? sender, EventArgs e)
     {
         if (_initializing) return;
@@ -102,8 +127,9 @@ public partial class MainPage
     }
 
     /// <summary>
-    /// Reads resource nodes (ore nodes, geysers, resource wells) out of a
-    /// Satisfactory save and shows them on the world map for snapping.
+    /// Reads a Satisfactory save: its resource nodes (shown on the world map for snapping) and,
+    /// optionally, its built machines — placed on the map at their real locations, miners snapped
+    /// to their nodes (the "import built factories" feature, Phase 1).
     /// </summary>
     private async void OnImportSaveClicked(object? sender, EventArgs e)
     {
@@ -120,12 +146,51 @@ public partial class MainPage
             });
             if (picked is null) return;
 
-            var nodes = await Task.Run(() => SatisfactorySaveReader.ReadResourceNodes(picked.FullPath));
-            _state.ImportMapNodes(nodes);
+            var world = await Task.Run(() => SatisfactorySaveReader.ReadWorld(picked.FullPath));
+            _state.ImportMapNodes(world.ResourceNodes);
             _state.Settings.ShowMap = true;
             _state.SaveSettings();
             UpdateMapButton();
             Canvas.Invalidate();
+
+            // Loading a save also imports its unlocked alternate recipes (so the planner
+            // matches what the player has actually unlocked).
+            var recipeSummary = await ApplyUnlockedRecipesFromSaveAsync(picked.FullPath);
+
+            // Offer to place the save's built machines onto the map (one undoable step), wired up
+            // from the save's belt/pipe graph, with parallel manifolds collapsed into counted
+            // nodes and the result grouped into outposts by location.
+            var (rawNodes, rawConnections) = SaveImport.Build(world, _state.Data);
+            var (factories, connections) = SaveConsolidation.Consolidate(rawNodes, rawConnections);
+            var placed = 0;
+            var outpostCount = 0;
+            var wireCount = 0;
+            if (factories.Count > 0
+                && await DisplayAlertAsync("Import built factories",
+                    $"This save has {rawNodes.Count} machine(s) we can place on the map at their real "
+                    + $"locations, wired from the belt/pipe connections. Parallel machines (manifolds / "
+                    + $"load-balancers) are merged into {factories.Count} counted nodes and grouped into "
+                    + "outposts. Add them to the current factory?\n\n"
+                    + "Extractors and machines keep their real recipe, clock and Somersloops; "
+                    + "truck and drone routes become dashed logistics links (trains aren't "
+                    + "imported yet).",
+                    "Place machines", "Skip"))
+            {
+                var outposts = SaveClustering.GroupByLocation(factories, _state.Data, SaveClustering.DefaultRadius);
+                SaveLayout.ArrangeOutposts(factories, connections, outposts);
+                _state.Editor.AddNodes([.. factories, .. outposts], connections);
+                placed = factories.Count;
+                outpostCount = outposts.Count;
+                wireCount = connections.Count;
+                _drawable.InvalidateLayouts();
+                Canvas.Invalidate();
+            }
+
+            var placedLine = placed > 0
+                ? $"\nPlaced {placed} node(s) in {outpostCount} outpost(s), {wireCount} connection(s)."
+                : "";
+            await DisplayAlertAsync("Import save",
+                $"Imported {world.ResourceNodes.Count} resource node(s).{placedLine}\n{recipeSummary}", "OK");
         }
         catch (Exception ex)
         {

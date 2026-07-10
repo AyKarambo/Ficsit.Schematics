@@ -37,13 +37,14 @@ public partial class MainPage : ContentPage
     private IDispatcherTimer? _saveDebounce;
     private PortDragContext? _pendingPortConnect;
 
-    private static readonly string[] SolverIds = ["None", "Manual", "Basic"];
+    private static readonly string[] SolverIds = ["None", "Manual", "Basic", "Full"];
     private static readonly string[] PathIds = ["Curves", "Direct", "2D"];
     private static readonly StorageMode[] StorageModes =
         [StorageMode.PartiallyFull, StorageMode.Full, StorageMode.Empty, StorageMode.InputEqualsOutput];
 
     public MainPage(AppState state, IconStore icons, LocalizationService loc,
-        NumberFormatService numbers, RecipeChooserViewModel chooser, SummaryViewModel summary)
+        NumberFormatService numbers, RecipeChooserViewModel chooser, SummaryViewModel summary,
+        FactoryCanvasDrawable drawable, CanvasController controller)
     {
         _state = state;
         _icons = icons;
@@ -55,27 +56,34 @@ public partial class MainPage : ContentPage
         InitializeComponent();
         BindingContext = this;
 
-        _drawable = new FactoryCanvasDrawable(state, icons, numbers);
-        _controller = new CanvasController(state, _drawable);
+        _drawable = drawable;
+        _controller = controller;
         Canvas.Drawable = _drawable;
 
         _controller.Invalidate += () =>
         {
             Canvas.Invalidate();
-            UpdateStatus();
+            // Panning/dragging can't change the solve, so skip the per-move status walk
+            // (every node + power lookup); it runs once when the gesture ends and after any
+            // real edit via OnSolved.
+            if (!_controller.IsInteracting) UpdateStatus();
         };
-        _controller.OpenRecipeChooser += ShowChooserAt;
+        _controller.OpenRecipeChooser += screen => ShowChooserAt(screen);
         _controller.OpenChooserForPort += ShowChooserForPort;
         _controller.OpenMachinePopup += ShowMachinePopup;
+        _controller.OpenPortMenu += ShowPortMenu;
+        _controller.OpenSelectionMenu += ShowSelectionMenu;
         _controller.EnterOutpostRequested += node => _state.Editor.EnterOutpost(node);
         _controller.EditLimitRequested += ShowLimitEditor;
-        _controller.CloseOverlays += CloseOverlays;
+        _controller.CloseTransientOverlays += CloseTransientOverlays;
 
         _state.Editor.Solved += OnSolved;
+        _state.Editor.GeometryChanged += OnGeometryChanged;
         _state.Editor.DocumentReplaced += OnDocumentReplaced;
         _state.SelectionChanged += () =>
         {
             if (SummaryPanel.IsVisible) Summary.Refresh();
+            RetargetMachinePopup();
             Canvas.Invalidate();
         };
         _state.MapNodesChanged += () =>
@@ -125,7 +133,7 @@ public partial class MainPage : ContentPage
 
         SolverPicker.ItemsSource = new List<string>
         {
-            _loc.L("NONE_SOLVER"), _loc.L("MANUAL_SOLVER"), _loc.L("BASIC_SOLVER"),
+            _loc.L("NONE_SOLVER"), _loc.L("MANUAL_SOLVER"), _loc.L("BASIC_SOLVER"), _loc.L("FULL_SOLVER"),
         };
         PathStylePicker.ItemsSource = new List<string>
         {
@@ -161,8 +169,12 @@ public partial class MainPage : ContentPage
         DragSensitivityEntry.Text = _state.Settings.DragSensitivity.ToString();
         AutosaveSwitch.IsToggled = _state.Settings.Autosave;
         AutosaveIntervalEntry.Text = _state.Settings.AutosaveIntervalMinutes.ToString();
+        ColorWiresSwitch.IsToggled = _state.Settings.WireColorByPart;
+        FocusHighlightSwitch.IsToggled = _state.Settings.FocusHighlight;
+        BeltCapacityWarningsSwitch.IsToggled = _state.Settings.ShowBeltCapacityWarnings;
 
         _initializing = wasInitializing;
+        ApplyPlannerToggleControls();
     }
 
     private void ApplyStrings()
@@ -202,6 +214,7 @@ public partial class MainPage : ContentPage
         PopupStorageLabel.Text = _loc.L("INTO_STORAGE");
         PopupVariantLabel.Text = _loc.L("MACHINE");
         PopupCapacityLabel.Text = _loc.L("TIER");
+        PopupCopySetupLabel.Text = "Copy machine setup";
         ToolTipProperties.SetText(PopupCutButton, _loc.L("CUT"));
         ToolTipProperties.SetText(PopupCopyButton, _loc.L("COPY"));
         ToolTipProperties.SetText(PopupPasteButton, _loc.L("PASTE"));
@@ -215,6 +228,9 @@ public partial class MainPage : ContentPage
         CalculatorLabel.Text = _loc.L("CALCULATOR");
         SettingsStyleHeader.Text = _loc.L("STYLE").ToUpperInvariant();
         PathStyleLabel.Text = _loc.L("CONNECTION_STYLE");
+        ColorWiresLabel.Text = "Colour wires by part";
+        FocusHighlightLabel.Text = "Focus highlight on hover";
+        BeltCapacityWarningsLabel.Text = "Belt/pipe capacity warnings";
         SettingsMultipliersHeader.Text = _loc.L("CALCULATOR").ToUpperInvariant();
         SpaceElevatorMultLabel.Text = _loc.L("SPACE_ELEVATOR_MULTIPLIER");
         InputMultLabel.Text = _loc.L("INPUT_MULTIPLIER");
@@ -241,6 +257,15 @@ public partial class MainPage : ContentPage
     }
 
     // ------------------------------------------------------- editor events
+
+    /// <summary>A node was moved: refresh the view without re-solving (positions don't change
+    /// flows, machine counts, power, or summaries).</summary>
+    private void OnGeometryChanged()
+    {
+        _drawable.InvalidateLayouts();
+        Canvas.Invalidate();
+        UpdateUndoRedo();
+    }
 
     private void OnSolved()
     {
@@ -287,6 +312,18 @@ public partial class MainPage : ContentPage
         if (editor.ScopePath.Count > 0)
         {
             var outpost = editor.ScopePath[^1];
+            // An outpost interior is always presented tidy: force the dependency layout over
+            // the members on entry (a no-op when nothing moved since the last format).
+            _controller.FormatNodes(editor.VisibleNodes.ToList());
+            // Members carry their real world positions; on first entry the outpost has no saved
+            // inner view (default pan/zoom = origin), which would leave imported members off-screen
+            // — so frame them. Once visited, the saved inner view is restored.
+            var unvisited = outpost.InnerZoom == 1.0 && outpost.InnerPanX == 0 && outpost.InnerPanY == 0;
+            if (unvisited && Canvas.Width > 0 && Canvas.Height > 0 && editor.VisibleNodes.Any())
+            {
+                _controller.ZoomToFit(new SizeF((float)Canvas.Width, (float)Canvas.Height));
+                return;
+            }
             _drawable.Zoom = (float)outpost.InnerZoom;
             _drawable.PanX = (float)outpost.InnerPanX;
             _drawable.PanY = (float)outpost.InnerPanY;
@@ -329,8 +366,25 @@ public partial class MainPage : ContentPage
             machines++;
             net += _state.Editor.Result.For(node).Power;
         }
+
+        // Count over-capacity connections when warnings are enabled.
+        var overCapacity = 0;
+        if (_state.Settings.ShowBeltCapacityWarnings)
+        {
+            foreach (var connection in _state.Editor.Graph.Connections)
+            {
+                var flow = _state.Editor.Result.FlowOf(connection);
+                if (flow <= Rational.Zero) continue;
+                var isFluid = _state.Data.PartsByName.TryGetValue(connection.Part, out var partDef) && partDef.Fluid;
+                var threshold = isFluid ? _state.Data.MaxPipeThroughput : _state.Data.MaxBeltThroughput;
+                if (Core.Model.ConnectionOverflowHelper.Check(flow, threshold) is not null)
+                    overCapacity++;
+            }
+        }
+
+        var overCapacityText = overCapacity > 0 ? $"   ·   {overCapacity} over-capacity" : string.Empty;
         StatusLabel.Text =
-            $"{machines} {_loc.L("MACHINES")}   ·   {_numbers.Summary(net)} MW   ·   {_loc.L(_state.Editor.Document.Solver.ToUpperInvariant() + "_SOLVER")}";
+            $"{machines} {_loc.L("MACHINES")}   ·   {_numbers.Summary(net)} MW   ·   {_loc.L(_state.Editor.Document.Solver.ToUpperInvariant() + "_SOLVER")}{overCapacityText}";
     }
 
     // --------------------------------------------------------- top toolbar
@@ -399,9 +453,33 @@ public partial class MainPage : ContentPage
         SettingsPanel.IsVisible = false;
         SavesPanel.IsVisible = false;
         AutoPlanPanel.IsVisible = false;
+        DraftPanel.IsVisible = false;
         PartPickerPanel.IsVisible = false;
+        RecipeListPanel.IsVisible = false;
+        PortMenu.IsVisible = false;
+        SelectionMenu.IsVisible = false;
         CommitLimitEditor();
         _popupNode = null;
+        _pendingPortConnect = null;
+        RefreshDraftChip();
+    }
+
+    /// <summary>
+    /// Press-time dismiss: closes every panel EXCEPT the docked machine editor,
+    /// which the click/selection logic retargets or closes itself so it can stay
+    /// open while the user clicks from one machine node to the next.
+    /// </summary>
+    private void CloseTransientOverlays()
+    {
+        ChooserPanel.IsVisible = false;
+        SettingsPanel.IsVisible = false;
+        SavesPanel.IsVisible = false;
+        AutoPlanPanel.IsVisible = false;
+        PartPickerPanel.IsVisible = false;
+        RecipeListPanel.IsVisible = false;
+        PortMenu.IsVisible = false;
+        SelectionMenu.IsVisible = false;
+        CommitLimitEditor();
         _pendingPortConnect = null;
     }
 
@@ -418,7 +496,7 @@ public partial class MainPage : ContentPage
     {
         if (ChooserPanel.IsVisible || MachinePopup.IsVisible
             || SettingsPanel.IsVisible || SavesPanel.IsVisible
-            || AutoPlanPanel.IsVisible || LimitEditor.IsVisible)
+            || AutoPlanPanel.IsVisible || RecipeListPanel.IsVisible || LimitEditor.IsVisible)
         {
             CloseOverlays();
         }

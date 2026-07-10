@@ -10,7 +10,9 @@ public static class SolverFactory
     {
         "None" => new NoneSolver(),
         "Manual" => new BasicSolver(data) { EnableDemandPull = false, LimitsAreExact = true },
-        // v1: the Full LP solver is not implemented yet; Basic is the closest behavior.
+        // "Full" adds priority splitter/merger routing on top of the Basic propagation
+        // (see docs/specs/full-solver.md). A global-LP refinement is a future step.
+        "Full" => new BasicSolver(data) { HonorPriorities = true },
         _ => new BasicSolver(data),
     };
 }
