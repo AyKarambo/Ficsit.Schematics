@@ -29,7 +29,7 @@ internal static class MachineStats
         ["Fluid Buffer"] = new("3-1", Cost: [C("Copper Sheet", 10), C("Modular Frame", 5)]),
         ["Foundry"] = new("3-3", Power: -16, OverclockExp: R("1321929/1000000"), Sloops: 2, SloopMultiplier: R("1/2"), SloopPowerExp: 2, Cost: [C("Modular Frame", 10), C("Rotor", 10), C("Concrete", 20)]),
         ["Fuel-Powered Generator"] = new("5-5", Power: 250, OverclockExp: 1, Cost: [C("Motor", 15), C("Encased Industrial Beam", 15), C("Copper Sheet", 30), C("Rubber", 50), C("Quickwire", 50)]),
-        ["Geothermal Generator"] = new("6-1", Power: 200, MinPower: 100, Cost: [C("Motor", 10), C("High-Speed Connector", 25), C("Modular Frame", 25), C("Copper Sheet", 50), C("Wire", 250)]),
+        ["Geothermal Generator"] = new("3-1", Power: 200, MinPower: 100, Cost: [C("Motor", 10), C("Modular Frame", 25), C("High-Speed Connector", 25), C("Copper Sheet", 50), C("Wire", 250)]),
         ["Industrial Fluid Buffer"] = new("5-5", Cost: [C("Encased Industrial Beam", 5), C("Copper Sheet", 10), C("Plastic", 25)]),
         ["Industrial Storage Container"] = new("4-2", Cost: [C("Steel Beam", 20), C("Steel Pipe", 20)]),
         ["Manufacturer"] = new("6-1", Power: -55, OverclockExp: R("1321929/1000000"), Sloops: 4, SloopMultiplier: R("1/4"), SloopPowerExp: 2, Cost: [C("Motor", 10), C("Modular Frame", 20), C("Plastic", 50), C("Cable", 50)]),

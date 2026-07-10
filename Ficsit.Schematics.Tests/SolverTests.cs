@@ -139,7 +139,7 @@ public class SolverTests
         var framePorts = result.For(frame);
         Assert.Equal("50/3", framePorts.Inputs["Modular Frame"].Target.ToString());      // 16.67
         Assert.Equal("200/3", framePorts.Inputs["Rubber"].Target.ToString());            // 66.67
-        Assert.Equal("1040/3", framePorts.Inputs["Screw"].Target.ToString());            // 346.67
+        Assert.Equal("1040/3", framePorts.Inputs["Screws"].Target.ToString());           // 346.67
         Assert.Equal("10/3", framePorts.Outputs["Heavy Modular Frame"].Target.ToString()); // 3.33
         // EIB fully supplied: 10/min in, no shortfall.
         Assert.Equal(new Rational(10), framePorts.Inputs["Encased Industrial Beam"].Connected);

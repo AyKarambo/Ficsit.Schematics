@@ -27,6 +27,7 @@ public static class CatalogWriter
         {
             ["Ficsit.Schematics.Core/GameData/Catalog/PartsCatalog.cs"] = RenderParts(model),
             ["Ficsit.Schematics.Core/GameData/Catalog/Machines/MachineStats.g.cs"] = RenderMachineStats(model),
+            ["Ficsit.Schematics.Core/Serialization/NameAliases.g.cs"] = RenderNameAliases(),
         };
 
         var sortIndex = GlobalRecipeOrder(model);
@@ -99,6 +100,39 @@ public static class CatalogWriter
         }
 
         sb.Append("    ];\n}\n");
+        return sb.ToString();
+    }
+
+    // ------------------------------------------------------------------ name aliases
+
+    private static string RenderNameAliases()
+    {
+        var sb = new StringBuilder();
+        sb.Append(Header);
+        sb.Append(
+            """
+            namespace Ficsit.Schematics.Core.Serialization;
+
+            /// <summary>
+            /// Legacy part/recipe/machine names → the game's current official names. Documents
+            /// written before a rename keep loading: the .sfmd reader resolves every stored
+            /// name through this table.
+            /// </summary>
+            public static class NameAliases
+            {
+                /// <summary>The official name for a possibly-legacy one (unknown names pass through).</summary>
+                public static string Resolve(string name)
+                    => ByLegacyName.TryGetValue(name, out var official) ? official : name;
+
+                public static readonly IReadOnlyDictionary<string, string> ByLegacyName = new Dictionary<string, string>(StringComparer.Ordinal)
+                {
+
+            """);
+
+        foreach (var (legacy, official) in Overrides.LegacyNames.OrderBy(kv => kv.Key, StringComparer.Ordinal))
+            sb.Append($"        [\"{legacy}\"] = \"{official}\",\n");
+
+        sb.Append("    };\n}\n");
         return sb.ToString();
     }
 

@@ -63,9 +63,9 @@ public class FromSaveTests
     [Fact]
     public void Cast_screw_stem_maps_to_the_recipe()
     {
-        // The user's reported case: a save with Cast Screw unlocked (stem "Screw").
+        // The user's reported case: a save with Cast Screws unlocked (stem "Screw").
         var (unlocked, _) = SchematicRecipeMap.Match(TestData.Database, ["Screw"]);
-        Assert.Contains("Cast Screw", unlocked);
+        Assert.Contains("Cast Screws", unlocked);
     }
 
     [Fact]
