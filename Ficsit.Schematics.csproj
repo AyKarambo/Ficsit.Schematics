@@ -2,6 +2,9 @@
 
 	<PropertyGroup>
 		<TargetFramework>net10.0-windows10.0.19041.0</TargetFramework>
+		<RuntimeIdentifiers>win-x64</RuntimeIdentifiers>
+		<!-- Declaring RuntimeIdentifiers disables MAUI's default RID pick; restore it for plain builds -->
+		<RuntimeIdentifier Condition="'$(RuntimeIdentifier)' == ''">win-x64</RuntimeIdentifier>
 
 		<OutputType>Exe</OutputType>
 		<RootNamespace>Ficsit.Schematics</RootNamespace>
@@ -24,9 +27,11 @@
 		<!-- App Identifier -->
 		<ApplicationId>com.companyname.ficsit.schematics</ApplicationId>
 
-		<!-- Versions -->
-		<ApplicationDisplayVersion>1.0</ApplicationDisplayVersion>
-		<ApplicationVersion>1</ApplicationVersion>
+		<!-- Versions: local-dev defaults; the release workflow injects the real values
+		     via -p:ApplicationDisplayVersion=X.Y.Z -p:Version=<full semver> (see installer/build-installer.ps1) -->
+		<ApplicationDisplayVersion Condition="'$(ApplicationDisplayVersion)' == ''">0.1.0</ApplicationDisplayVersion>
+		<ApplicationVersion Condition="'$(ApplicationVersion)' == ''">1</ApplicationVersion>
+		<Version Condition="'$(Version)' == ''">$(ApplicationDisplayVersion)</Version>
 
 		<!-- To develop, package, and publish an app to the Microsoft Store, see: https://aka.ms/MauiTemplateUnpackaged -->
 		<WindowsPackageType>None</WindowsPackageType>

@@ -364,3 +364,9 @@ FodyWeavers.xsd
 
 # Ignore repository _reference directory
 /_reference/
+
+# Installer build output (WiX MSI, see installer/build-installer.ps1)
+installer/out/
+
+# The win-x64 release publish profile is shared, not user-specific (overrides *.pubxml above)
+!Properties/PublishProfiles/win-x64.pubxml
