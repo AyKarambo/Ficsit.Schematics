@@ -50,6 +50,37 @@ public class RealSaveTests
             $"Expected thousands of component links, got {RandomNode.ComponentLinks.Count}.");
     }
 
+    // --------------------------------------------------- train routes (AC2)
+
+    [Fact]
+    public void Dune_desert_resolves_its_nine_timetables_into_train_routes()
+    {
+        var trains = DuneDesert.VehicleRoutes.Where(r => r.Kind == LogisticsKind.Train).ToList();
+        Assert.Equal(9, trains.Count); // one per timetabled train
+        Assert.All(trains, r => Assert.True(r.Stations.Count >= 2));
+        // Routes run over freight platforms (where the belts terminate), never the station
+        // buildings themselves; platforms shared by several trains appear in several routes.
+        Assert.All(trains, r => Assert.All(r.Stations,
+            s => Assert.Contains(".Build_TrainDockingStation", s)));
+        var distinct = trains.SelectMany(r => r.Stations).Distinct().Count();
+        Assert.InRange(distinct, 10, 40); // the save has 40 freight platforms
+    }
+
+    [Fact]
+    public void Dune_desert_materializes_dashed_train_connections_on_import()
+    {
+        var (nodes, connections) = SaveImport.Build(DuneDesert, TestData.Database);
+
+        Assert.NotEmpty(nodes);
+        var trains = connections.Where(c => c.Logistics == LogisticsKind.Train).ToList();
+        Assert.NotEmpty(trains); // real cargo crosses the rails (e.g. Compacted Coal → Turbofuel)
+        Assert.All(trains, c =>
+        {
+            Assert.False(string.IsNullOrEmpty(c.Part));
+            Assert.NotEqual(c.From, c.To);
+        });
+    }
+
     // ------------------------------------------- truck regression gate (AC5)
 
     [Fact]
@@ -58,5 +89,17 @@ public class RealSaveTests
         var trucks = RandomNode.VehicleRoutes.Where(r => r.Kind == LogisticsKind.Truck).ToList();
         Assert.Equal(3, trucks.Count);
         Assert.Equal([2, 4, 13], trucks.Select(r => r.Stations.Count).OrderBy(n => n));
+    }
+
+    [Fact]
+    public void Random_node_imports_with_zero_train_links()
+    {
+        // The rail-free save is the no-false-positives gate: nothing in it (particularly not
+        // mPathNetworkID, which belongs to wheeled-vehicle path nodes) may read as a train.
+        Assert.DoesNotContain(RandomNode.VehicleRoutes, r => r.Kind == LogisticsKind.Train);
+
+        var (_, connections) = SaveImport.Build(RandomNode, TestData.Database);
+        Assert.DoesNotContain(connections, c => c.Logistics == LogisticsKind.Train);
+        Assert.Contains(connections, c => c.Logistics == LogisticsKind.Truck);
     }
 }
