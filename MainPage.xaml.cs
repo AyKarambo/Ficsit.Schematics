@@ -205,6 +205,9 @@ public partial class MainPage : ContentPage
         UpdateChips();
 
         PopupTitleEntry.Placeholder = _loc.L("TITLE");
+        PopupOpenLabel.Text = _loc.L("OPEN");
+        PopupBlueprintLabel.Text = _loc.L("Blueprint");
+        ToolTipProperties.SetText(PopupBlueprintSwitch, _loc.L("BLUEPRINT_HELP"));
         PopupRecipeLabel.Text = _loc.L("RECIPE_NAME");
         PopupClockLabel.Text = _loc.L("CLOCKSPEED");
         PopupAutoClockLabel.Text = _loc.L("CLOCKSPEED");

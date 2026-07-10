@@ -371,6 +371,18 @@
 
                 <Entry x:Name="PopupTitleEntry" Style="{StaticResource FieldEntry}" Completed="OnPopupTitleCompleted" />
 
+                <!-- outpost/blueprint only: enter the container (same as double-click) -->
+                <Grid x:Name="PopupOpenRow" IsVisible="False" ColumnDefinitions="*,Auto" ColumnSpacing="6">
+                    <Label x:Name="PopupOpenLabel" Style="{StaticResource RowLabel}" />
+                    <Button x:Name="PopupOpenButton" Grid.Column="1" Style="{StaticResource IconButton}" Text="&#xE8A7;" FontSize="11" WidthRequest="30" Clicked="OnPopupOpenClicked" />
+                </Grid>
+
+                <!-- outpost/blueprint only: flip the container kind -->
+                <Grid x:Name="PopupBlueprintRow" IsVisible="False" ColumnDefinitions="*,Auto">
+                    <Label x:Name="PopupBlueprintLabel" Style="{StaticResource RowLabel}" />
+                    <Switch x:Name="PopupBlueprintSwitch" Grid.Column="1" Toggled="OnBlueprintToggled" />
+                </Grid>
+
                 <!-- recipe / fuel switcher: every recipe this machine can run -->
                 <Grid x:Name="PopupRecipeRow" ColumnDefinitions="*,Auto" ColumnSpacing="6">
                     <Label x:Name="PopupRecipeLabel" Style="{StaticResource RowLabel}" />
