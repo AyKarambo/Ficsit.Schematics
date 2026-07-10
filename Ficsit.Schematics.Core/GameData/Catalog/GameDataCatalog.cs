@@ -23,6 +23,15 @@ public static class GameDataCatalog
 
     public static GameDatabase BuildDatabase() => new(BuildDocument());
 
+    private static readonly Lazy<GameDatabase> SharedLazy = new(BuildDatabase);
+
+    /// <summary>
+    /// The process-wide database instance. The catalog is immutable and its build
+    /// deterministic, so one lazily-built instance serves everyone — the app's DI
+    /// singleton, the tests, and static consumers such as the SFMD serializer.
+    /// </summary>
+    public static GameDatabase Shared => SharedLazy.Value;
+
     /// <summary>Restores canonical game order from the per-entry sort keys.</summary>
     private static IEnumerable<TDefinition> Ordered<TDefinition>(
         IEnumerable<(int Sort, TDefinition Definition)> items)
