@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using Ficsit.Schematics.Core.GameData.Catalog;
 using Ficsit.Schematics.Core.Model;
 using Ficsit.Schematics.Core.Numerics;
 
@@ -25,6 +26,20 @@ public static class SfmdSerializer
         "Priority Splurger", "AWESOME Sink", "Storage Container", "Dimensional Depot",
         "Fuel-Powered Generator", "Coal-Powered Generator", "Nuclear Power Plant", "Biomass Burner",
     };
+
+    /// <summary>
+    /// Legacy per-fuel generator nodes ("Turbofuel Generator", "Coal Generator", …) migrate on
+    /// load to the unified generator named by their machine. Derived from game data: every
+    /// recipe of a <see cref="GameData.GameDatabase.GeneratorMachines"/> machine maps to that
+    /// machine (including "Biomass Burner", whose recipe name equals the machine name).
+    /// </summary>
+    private static readonly Lazy<Dictionary<string, string>> GeneratorMachineByRecipe = new(() =>
+    {
+        var data = GameDataCatalog.Shared;
+        return data.Document.Recipes
+            .Where(r => data.GeneratorMachines.Contains(r.Machine))
+            .ToDictionary(r => r.Name, r => r.Machine, StringComparer.Ordinal);
+    });
 
     public static string Serialize(FactoryDocument document)
     {
@@ -239,6 +254,16 @@ public static class SfmdSerializer
             // migrated away by BypassLegacyHandles once all connections are wired.
             if (obj["Kind"] is { } rawKindNode && GetString(rawKindNode, string.Empty) is "Import" or "Export")
                 legacyHandles.Add(node);
+            // Legacy per-fuel generator node (a recipe of a generator machine, e.g. "Turbofuel
+            // Generator"): load as the unified generator named by its machine. Its wired inputs
+            // are preserved, so the solver resolves the same fuel recipe and the flows are
+            // unchanged; an unwired one becomes a unified generator at rated power.
+            else if (node.Kind == NodeKind.Recipe
+                && GeneratorMachineByRecipe.Value.TryGetValue(name, out var generatorMachine))
+            {
+                node.Kind = NodeKind.Generator;
+                node.Name = generatorMachine;
+            }
 
             if (obj["Ppm"] is JsonValue ppm) node.ShowPpm = ppm.GetValue<bool>();
             if (obj["ClockSpeed"] is JsonValue clock
@@ -310,8 +335,9 @@ public static class SfmdSerializer
         "AWESOME Sink" => NodeKind.AwesomeSink,
         "Storage Container" => NodeKind.StorageContainer,
         "Dimensional Depot" => NodeKind.DimensionalDepot,
-        "Fuel-Powered Generator" or "Coal-Powered Generator"
-            or "Nuclear Power Plant" or "Biomass Burner" => NodeKind.Generator,
+        // Unified fuel generators, derived from game data (a machine that produces power
+        // and has fuel-burning recipes): Fuel-Powered / Coal-Powered / Nuclear / Biomass.
+        _ when GameDataCatalog.Shared.GeneratorMachines.Contains(name) => NodeKind.Generator,
         _ => NodeKind.Recipe,
     };
 
