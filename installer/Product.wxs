@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+	Per-user MSI for Ficsit.Schematics (no UAC prompt): installs the self-contained
+	win-x64 publish output under %LOCALAPPDATA%\Programs\Ficsit.Schematics.
+
+	Built by installer/build-installer.ps1 (locally and in .github/workflows/release.yml),
+	which supplies the preprocessor variables:
+	  Version    - numeric MSI ProductVersion (X.Y.Z, prerelease suffix stripped)
+	  PublishDir - the dotnet publish output folder to harvest
+	  IconPath   - the resizetizer-generated appicon.ico
+-->
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+	<Package Name="Ficsit.Schematics"
+	         Manufacturer="Timo Seikel"
+	         Version="$(var.Version)"
+	         UpgradeCode="7f1f38dd-92b5-4f28-9d2e-6f2c8f5f0a44"
+	         Scope="perUser"
+	         Language="1033">
+
+		<MajorUpgrade DowngradeErrorMessage="A newer version of [ProductName] is already installed." />
+		<MediaTemplate EmbedCab="yes" />
+
+		<Icon Id="AppIcon.ico" SourceFile="$(var.IconPath)" />
+		<Property Id="ARPPRODUCTICON" Value="AppIcon.ico" />
+
+		<!-- App files: harvest the entire publish folder -->
+		<StandardDirectory Id="LocalAppDataFolder">
+			<Directory Id="ProgramsFolder" Name="Programs">
+				<Directory Id="INSTALLFOLDER" Name="Ficsit.Schematics">
+					<Files Include="$(var.PublishDir)\**" />
+				</Directory>
+			</Directory>
+		</StandardDirectory>
+
+		<!-- Start Menu shortcut (HKCU registry value as per-user keypath) -->
+		<StandardDirectory Id="ProgramMenuFolder">
+			<Component Id="StartMenuShortcut" Guid="8c0d3fd0-3c26-4b7e-b3a3-1f6f0f6a9b21">
+				<Shortcut Id="AppStartMenuShortcut"
+				          Name="Ficsit.Schematics"
+				          Description="Factory planner for Satisfactory"
+				          Target="[INSTALLFOLDER]Ficsit.Schematics.exe"
+				          WorkingDirectory="INSTALLFOLDER"
+				          Icon="AppIcon.ico" />
+				<RegistryValue Root="HKCU"
+				               Key="Software\Ficsit.Schematics"
+				               Name="StartMenuShortcut"
+				               Type="integer"
+				               Value="1"
+				               KeyPath="yes" />
+			</Component>
+		</StandardDirectory>
+	</Package>
+</Wix>
