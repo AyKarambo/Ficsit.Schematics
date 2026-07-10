@@ -369,17 +369,7 @@ public class SaveWorldScanTests
     }
 
     private static byte[] LinkProperty(string target)
-    {
-        using var ms = new MemoryStream();
-        using var w = new BinaryWriter(ms);
-        WriteFString(w, "mConnectedComponent");
-        WriteFString(w, "ObjectProperty");
-        w.Write(0); w.Write(38); w.Write((byte)0);
-        WriteFString(w, "Persistent_Level");
-        WriteFString(w, target);
-        w.Flush();
-        return ms.ToArray();
-    }
+        => ObjectRefProperty("mConnectedComponent", target);
 
     /// <summary>A docking path node's data: the parent-actor ref (its station) followed by the
     /// road-network id property.</summary>
@@ -398,15 +388,5 @@ public class SaveWorldScanTests
     }
 
     private static byte[] PairedStationSpan(string target)
-    {
-        using var ms = new MemoryStream();
-        using var w = new BinaryWriter(ms);
-        WriteFString(w, "mPairedStation");
-        WriteFString(w, "ObjectProperty");
-        w.Write(0); w.Write(38); w.Write((byte)0);
-        WriteFString(w, "Persistent_Level");
-        WriteFString(w, target);
-        w.Flush();
-        return ms.ToArray();
-    }
+        => ObjectRefProperty("mPairedStation", target);
 }
