@@ -1,0 +1,23 @@
+# PR gate: build + test on every push/PR to main. Deliberately fast - the tests
+# cover Core + Data only and need no MAUI workload (the app itself is built and
+# packaged by release.yml, which shares the same setup-dotnet + test steps).
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Test (Core + Data)
+        run: dotnet test Ficsit.Schematics.Tests/Ficsit.Schematics.Tests.csproj --configuration Release
