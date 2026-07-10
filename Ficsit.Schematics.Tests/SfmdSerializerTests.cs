@@ -1,6 +1,8 @@
 using System.Text.Json.Nodes;
 using Ficsit.Schematics.Core.Model;
+using Ficsit.Schematics.Core.Numerics;
 using Ficsit.Schematics.Core.Serialization;
+using Ficsit.Schematics.Core.Solver;
 using Xunit;
 
 namespace Ficsit.Schematics.Tests;
@@ -174,6 +176,101 @@ public class SfmdSerializerTests
         Assert.Equal(NodeKind.Generator, node.Kind);
         Assert.Equal("Fuel-Powered Generator", node.Name);
         Assert.Equal("2", node.Max);
+    }
+
+    // --------------------------------------------- Legacy per-fuel generator migration (#16)
+
+    [Fact]
+    public void Legacy_per_fuel_generator_node_migrates_and_keeps_its_wired_fuel()
+    {
+        // Old save: a "Turbofuel Generator" recipe node with Turbofuel wired in. It must load
+        // as the unified generator named by its machine, keep the connection, and solve to the
+        // exact flows the per-fuel recipe produced (7.5 Turbofuel/min and 250 MW per machine).
+        const string json = """
+            {"Version":"1.0","Data":[
+              {"Name":"Storage Container","X":0,"Y":0},
+              {"Name":"Turbofuel Generator","X":100,"Y":0,"Max":"2","Inputs":{"Turbofuel":[0]}}
+            ]}
+            """;
+        var doc = SfmdSerializer.Deserialize(json);
+
+        var generator = doc.Root.Nodes.Single(n => n.Kind == NodeKind.Generator);
+        Assert.Equal("Fuel-Powered Generator", generator.Name);
+        var connection = Assert.Single(doc.Root.Connections);
+        Assert.Same(generator, connection.To);
+        Assert.Equal("Turbofuel", connection.Part);
+
+        var result = new BasicSolver(TestData.Database).Solve(doc);
+        Assert.Equal(new Rational(2), result.For(generator).Count);
+        Assert.Equal(new Rational(500), result.For(generator).Power);           // 2 × 250 MW
+        Assert.Equal(new Rational(15), result.For(generator).Inputs["Turbofuel"].Target); // 2 × 7.5/min
+    }
+
+    [Fact]
+    public void Every_legacy_per_fuel_generator_recipe_migrates_to_its_machine()
+    {
+        // Data-driven over the whole catalog: every recipe of a generator machine is a legacy
+        // node name that must load as that machine's unified generator (includes "Biomass
+        // Burner", whose recipe name equals the machine name).
+        var data = TestData.Database;
+        var legacy = data.Document.Recipes
+            .Where(r => data.GeneratorMachines.Contains(r.Machine)).ToList();
+        Assert.NotEmpty(legacy);
+
+        foreach (var recipe in legacy)
+        {
+            var json = $$"""{"Version":"1.0","Data":[{"Name":"{{recipe.Name}}","X":0,"Y":0}]}""";
+            var node = Assert.Single(SfmdSerializer.Deserialize(json).Root.Nodes);
+            Assert.Equal(NodeKind.Generator, node.Kind);
+            Assert.Equal(recipe.Machine, node.Name);
+        }
+    }
+
+    [Fact]
+    public void Unwired_legacy_generator_node_reports_rated_power_for_its_count()
+    {
+        // Documented behavior change: with no fuel wired, the migrated node is a unified
+        // generator at rated power (a legacy recipe node showed fuel consumption even unwired).
+        const string json = """
+            {"Version":"1.0","Data":[{"Name":"Coal Generator","X":0,"Y":0,"Max":"2"}]}
+            """;
+        var doc = SfmdSerializer.Deserialize(json);
+
+        var generator = Assert.Single(doc.Root.Nodes);
+        Assert.Equal(NodeKind.Generator, generator.Kind);
+        Assert.Equal("Coal-Powered Generator", generator.Name);
+
+        var result = new BasicSolver(TestData.Database).Solve(doc);
+        Assert.Equal(new Rational(2), result.For(generator).Count);
+        Assert.Equal(new Rational(150), result.For(generator).Power); // 2 × 75 MW rated
+    }
+
+    [Fact]
+    public void Migrated_document_saves_machine_named_generators_and_roundtrips_stably()
+    {
+        const string json = """
+            {"Version":"1.0","Data":[
+              {"Name":"Storage Container","X":0,"Y":0},
+              {"Name":"Turbofuel Generator","X":100,"Y":0,"Inputs":{"Turbofuel":[0]}},
+              {"Name":"Uranium Nuclear Power Plant","X":200,"Y":0}
+            ]}
+            """;
+        var doc = SfmdSerializer.Deserialize(json);
+        var saved = SfmdSerializer.Serialize(doc);
+
+        // The saved file carries only machine-named generators — no legacy per-fuel names.
+        var data = TestData.Database;
+        foreach (var recipe in data.Document.Recipes
+                     .Where(r => data.GeneratorMachines.Contains(r.Machine) && r.Name != r.Machine))
+            Assert.DoesNotContain(recipe.Name, saved);
+
+        // And reloads stably: same names, kinds and wiring.
+        var reloaded = SfmdSerializer.Deserialize(saved);
+        Assert.Equal(doc.Root.Nodes.Select(n => (n.Name, n.Kind)),
+            reloaded.Root.Nodes.Select(n => (n.Name, n.Kind)));
+        var connection = Assert.Single(reloaded.Root.Connections);
+        Assert.Equal("Turbofuel", connection.Part);
+        Assert.Equal("Fuel-Powered Generator", connection.To.Name);
     }
 
     [Fact]
