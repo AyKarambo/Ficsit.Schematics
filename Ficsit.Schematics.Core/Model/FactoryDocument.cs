@@ -5,6 +5,10 @@ public sealed class FactoryDocument
 {
     public FactoryGraph Root { get; set; } = new();
 
+    /// <summary>The outpost the view is focused on; null = root canvas. References a node in
+    /// <see cref="Root"/>; persisted as the document-level "Outpost" index in .sfmd.</summary>
+    public FactoryNode? ActiveOutpost { get; set; }
+
     public string Language { get; set; } = "en-US";
     public string Solver { get; set; } = "Basic";
 
