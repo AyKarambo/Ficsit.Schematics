@@ -111,7 +111,25 @@ public sealed class FicsitStore : IDisposable
     // --------------------------------------------------------------- settings
 
     public AppSettings LoadSettings()
-        => Settings.FindById(1) ?? new AppSettings();
+        => MigrateNames(Settings.FindById(1) ?? new AppSettings());
+
+    /// <summary>Part/recipe/machine names persisted before a catalog rename keep acting:
+    /// resolve every stored name through the alias table, exactly like the .sfmd reader
+    /// does for documents (factories and backups already migrate via <see cref="FromBson"/>).</summary>
+    private static AppSettings MigrateNames(AppSettings settings)
+    {
+        settings.PlannerDisabledRecipes = settings.PlannerDisabledRecipes
+            .Select(NameAliases.Resolve).Distinct().ToList();
+
+        var preferences = new Dictionary<string, int>();
+        foreach (var (part, weight) in settings.PlannerResourcePreferences)
+            preferences[NameAliases.Resolve(part)] = weight;
+        settings.PlannerResourcePreferences = preferences;
+
+        foreach (var machineDefault in settings.MachineDefaults)
+            machineDefault.Name = NameAliases.Resolve(machineDefault.Name);
+        return settings;
+    }
 
     public void SaveSettings(AppSettings settings)
     {

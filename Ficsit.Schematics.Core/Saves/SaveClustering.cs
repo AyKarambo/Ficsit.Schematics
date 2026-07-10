@@ -98,7 +98,7 @@ public static class SaveClustering
     /// "Basic Iron Parts" rather than whichever single part happens to dominate.</summary>
     private static readonly Dictionary<string, string> ProductCategories = new(StringComparer.Ordinal)
     {
-        ["Iron Rod"] = "Basic Iron Parts", ["Iron Plate"] = "Basic Iron Parts", ["Screw"] = "Basic Iron Parts",
+        ["Iron Rod"] = "Basic Iron Parts", ["Iron Plate"] = "Basic Iron Parts", ["Screws"] = "Basic Iron Parts",
         ["Reinforced Iron Plate"] = "Advanced Iron Parts", ["Modular Frame"] = "Advanced Iron Parts",
         ["Rotor"] = "Advanced Iron Parts", ["Smart Plating"] = "Advanced Iron Parts",
         ["Wire"] = "Copper Parts", ["Cable"] = "Copper Parts", ["Copper Sheet"] = "Copper Parts",

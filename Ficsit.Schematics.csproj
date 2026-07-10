@@ -42,11 +42,11 @@
 
 	<ItemGroup>
 		<!-- Sibling project folders and reference material live under the app root; keep them out of the app build -->
-		<Compile Remove="Ficsit.Schematics.Core\**;Ficsit.Schematics.Data\**;Ficsit.Schematics.Tests\**;_reference\**" />
-		<None Remove="Ficsit.Schematics.Core\**;Ficsit.Schematics.Data\**;Ficsit.Schematics.Tests\**;_reference\**" />
-		<EmbeddedResource Remove="Ficsit.Schematics.Core\**;Ficsit.Schematics.Data\**;Ficsit.Schematics.Tests\**;_reference\**" />
-		<MauiXaml Remove="Ficsit.Schematics.Core\**;Ficsit.Schematics.Data\**;Ficsit.Schematics.Tests\**;_reference\**" />
-		<MauiCss Remove="Ficsit.Schematics.Core\**;Ficsit.Schematics.Data\**;Ficsit.Schematics.Tests\**;_reference\**" />
+		<Compile Remove="Ficsit.Schematics.CatalogGenerator\**;Ficsit.Schematics.Core\**;Ficsit.Schematics.Data\**;Ficsit.Schematics.Tests\**;_reference\**" />
+		<None Remove="Ficsit.Schematics.CatalogGenerator\**;Ficsit.Schematics.Core\**;Ficsit.Schematics.Data\**;Ficsit.Schematics.Tests\**;_reference\**" />
+		<EmbeddedResource Remove="Ficsit.Schematics.CatalogGenerator\**;Ficsit.Schematics.Core\**;Ficsit.Schematics.Data\**;Ficsit.Schematics.Tests\**;_reference\**" />
+		<MauiXaml Remove="Ficsit.Schematics.CatalogGenerator\**;Ficsit.Schematics.Core\**;Ficsit.Schematics.Data\**;Ficsit.Schematics.Tests\**;_reference\**" />
+		<MauiCss Remove="Ficsit.Schematics.CatalogGenerator\**;Ficsit.Schematics.Core\**;Ficsit.Schematics.Data\**;Ficsit.Schematics.Tests\**;_reference\**" />
 	</ItemGroup>
 
 	<ItemGroup>

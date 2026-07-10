@@ -14,6 +14,7 @@
 	</ItemGroup>
 
 	<ItemGroup>
+		<ProjectReference Include="..\Ficsit.Schematics.CatalogGenerator\Ficsit.Schematics.CatalogGenerator.csproj" />
 		<ProjectReference Include="..\Ficsit.Schematics.Core\Ficsit.Schematics.Core.csproj" />
 		<ProjectReference Include="..\Ficsit.Schematics.Data\Ficsit.Schematics.Data.csproj" />
 	</ItemGroup>

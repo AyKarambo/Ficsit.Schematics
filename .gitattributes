@@ -5,6 +5,9 @@
 *.cs text eol=lf
 *.sav binary
 
+# The committed Satisfactory Docs export (re-encoded UTF-8/LF from the game's UTF-16LE).
+Ficsit.Schematics.CatalogGenerator/Docs/*.json text eol=lf
+
 ###############################################################################
 # Set default behavior for command prompt diff.
 #

@@ -108,15 +108,45 @@ public class SfmdSerializerTests
         var node = new FactoryNode
         {
             Name = "Heavy Flexible Frame",
-            InputOrder = ["Rubber", "Modular Frame", "Screw"],
+            InputOrder = ["Rubber", "Modular Frame", "Screws"],
             OutputOrder = ["Heavy Modular Frame"],
         };
         doc.Root.Nodes.Add(node);
 
         var reloaded = SfmdSerializer.Deserialize(SfmdSerializer.Serialize(doc));
         var n = Assert.Single(reloaded.Root.Nodes);
-        Assert.Equal(new[] { "Rubber", "Modular Frame", "Screw" }, n.InputOrder);
+        Assert.Equal(new[] { "Rubber", "Modular Frame", "Screws" }, n.InputOrder);
         Assert.Equal(new[] { "Heavy Modular Frame" }, n.OutputOrder);
+    }
+
+    [Fact]
+    public void Legacy_names_resolve_through_the_alias_table_on_load()
+    {
+        // A document written before the official Screw → Screws rename: the recipe node,
+        // its input keys and the port order all use the legacy names.
+        const string legacy =
+            """
+            {"Version":"1.0","Data":[
+                {"Name":"Screw","X":0,"Y":0},
+                {"Name":"Reinforced Iron Plate","X":100,"Y":0,
+                 "Inputs":{"Screw":[0]},"InputOrder":["Screw","Iron Plate"]}
+            ]}
+            """;
+
+        var doc = SfmdSerializer.Deserialize(legacy);
+
+        var screws = doc.Root.Nodes[0];
+        var plate = doc.Root.Nodes[1];
+        Assert.Equal("Screws", screws.Name); // node resolves to the official recipe name
+        var connection = Assert.Single(doc.Root.Connections);
+        Assert.Equal("Screws", connection.Part); // input keys resolve too
+        Assert.Same(screws, connection.From);
+        Assert.Same(plate, connection.To);
+        Assert.Equal(new[] { "Screws", "Iron Plate" }, plate.InputOrder);
+
+        // The resolved names exist in the regenerated catalog, so the document solves.
+        Assert.True(TestData.Database.RecipesByName.ContainsKey(screws.Name));
+        Assert.True(TestData.Database.PartsByName.ContainsKey(connection.Part));
     }
 
     [Fact]

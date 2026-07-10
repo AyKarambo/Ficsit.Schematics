@@ -154,7 +154,7 @@ public static class SfmdSerializer
         foreach (var element in array)
         {
             var value = GetString(element, string.Empty);
-            if (value.Length > 0) parts.Add(value);
+            if (value.Length > 0) parts.Add(NameAliases.Resolve(value));
         }
         return parts;
     }
@@ -251,7 +251,9 @@ public static class SfmdSerializer
         foreach (var element in data)
         {
             if (element is not JsonObject obj) continue;
-            var name = GetString(obj["Name"], string.Empty);
+            // Legacy documents may use pre-rename part/recipe/machine names; resolve them
+            // to the current official names so old saves keep loading.
+            var name = NameAliases.Resolve(GetString(obj["Name"], string.Empty));
             var node = new FactoryNode
             {
                 Name = name,
@@ -265,7 +267,7 @@ public static class SfmdSerializer
                 Max = obj["Max"]?.GetValue<string>(),
                 Somersloops = (int)GetDouble(obj["Somersloops"], 0),
                 AutoRound = obj["AutoRound"]?.GetValue<bool>() ?? false,
-                MachineVariant = obj["Machine"]?.GetValue<string>(),
+                MachineVariant = obj["Machine"]?.GetValue<string>() is { } variant ? NameAliases.Resolve(variant) : null,
                 Capacity = obj["Capacity"]?.GetValue<string>(),
                 ResourceNodeId = obj["ResourceNode"]?.GetValue<string>(),
                 Parent = parent,
@@ -309,7 +311,7 @@ public static class SfmdSerializer
             if (obj["Inputs"] is JsonObject inputs)
                 foreach (var (part, sourcesNode) in inputs)
                     if (sourcesNode is JsonArray sources)
-                        pendingInputs.Add((node, part,
+                        pendingInputs.Add((node, NameAliases.Resolve(part),
                             sources.Select(s => (int)GetDouble(s, -1)).Where(i => i >= 0).ToList()));
 
             if (obj["InputsVia"] is JsonObject viaObj)
@@ -318,7 +320,7 @@ public static class SfmdSerializer
                         foreach (var (sourceText, kindValue) in map)
                             if (int.TryParse(sourceText, out var source)
                                 && Enum.TryParse<LogisticsKind>(GetString(kindValue, string.Empty), out var kind))
-                                pendingVia[(node, part, source)] = kind;
+                                pendingVia[(node, NameAliases.Resolve(part), source)] = kind;
 
             graph.Nodes.Add(node);
             local.Add(node);

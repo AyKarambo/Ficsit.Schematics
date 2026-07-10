@@ -131,6 +131,49 @@ public class StoreTests : IDisposable
         Assert.False(reloaded.PlannerAutoCollapse);
     }
 
+    [Fact]
+    public void Legacy_recipe_names_in_persisted_settings_resolve_on_load()
+    {
+        // An install predating the Screw → Screws renames stored the old names verbatim.
+        using var store = new FicsitStore(_path);
+        var settings = store.LoadSettings();
+        settings.PlannerDisabledRecipes.Add("Cast Screw");
+        settings.PlannerDisabledRecipes.Add("Steel Screw");
+        settings.PlannerDisabledRecipes.Add("Pure Iron Ingot"); // current names pass through
+        store.SaveSettings(settings);
+
+        var reloaded = store.LoadSettings();
+
+        Assert.Equal(
+            ["Cast Screws", "Steel Screws", "Pure Iron Ingot"],
+            reloaded.PlannerDisabledRecipes);
+        // Every loaded entry must still name a live catalog recipe, or the user's
+        // explicit disable silently stops acting.
+        foreach (var name in reloaded.PlannerDisabledRecipes)
+            Assert.True(TestData.Database.RecipesByName.ContainsKey(name),
+                $"'{name}' does not exist in the catalog.");
+    }
+
+    [Fact]
+    public void Legacy_names_in_other_persisted_settings_surfaces_resolve_on_load()
+    {
+        // The same alias migration must cover every settings field that stores
+        // part/recipe/machine names, not just the disabled-recipes list.
+        using var store = new FicsitStore(_path);
+        var settings = store.LoadSettings();
+        settings.PlannerResourcePreferences["Screw"] = 12; // legacy part name as a key
+        settings.PlannerResourcePreferences["Iron Ore"] = 40;
+        settings.MachineDefaults.Add(new MachineDefaultSetting { Name = "Screw" });
+        store.SaveSettings(settings);
+
+        var reloaded = store.LoadSettings();
+
+        Assert.Equal(12, reloaded.PlannerResourcePreferences["Screws"]);
+        Assert.Equal(40, reloaded.PlannerResourcePreferences["Iron Ore"]);
+        Assert.False(reloaded.PlannerResourcePreferences.ContainsKey("Screw"));
+        Assert.Equal("Screws", Assert.Single(reloaded.MachineDefaults).Name);
+    }
+
     public void Dispose()
     {
         if (File.Exists(_path)) File.Delete(_path);
