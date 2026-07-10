@@ -94,6 +94,51 @@ public class FactoryEditorTests
     }
 
     [Fact]
+    public void SetOutpostKind_flips_kind_and_name_as_one_undoable_step()
+    {
+        var editor = new FactoryEditor(TestData.Database);
+        var outpost = editor.AddNode("Outpost", 0, 0);
+        editor.SetProperty(outpost, "Title", n => n.Title, (n, v) => n.Title = v, "Steel works");
+
+        editor.SetOutpostKind(outpost, blueprint: true);
+        Assert.Equal(NodeKind.Blueprint, outpost.Kind);
+        Assert.Equal("Blueprint", outpost.Name); // saves derive the kind from the name
+        Assert.Equal("Steel works", outpost.Title);
+
+        editor.Commands.Undo();
+        Assert.Equal(NodeKind.Outpost, outpost.Kind);
+        Assert.Equal("Outpost", outpost.Name);
+
+        editor.Commands.Redo();
+        Assert.Equal(NodeKind.Blueprint, outpost.Kind);
+        Assert.Equal("Blueprint", outpost.Name);
+
+        editor.SetOutpostKind(outpost, blueprint: false); // and back again
+        Assert.Equal(NodeKind.Outpost, outpost.Kind);
+        Assert.Equal("Outpost", outpost.Name);
+    }
+
+    [Fact]
+    public void SetOutpostKind_ignores_machines_and_noop_flips()
+    {
+        var editor = new FactoryEditor(TestData.Database);
+        var machine = editor.AddNode("Iron Ingot", 0, 0);
+        var outpost = editor.AddNode("Outpost", 100, 0);
+
+        editor.SetOutpostKind(machine, blueprint: true);   // not a container
+        editor.SetOutpostKind(outpost, blueprint: false);  // already an outpost
+
+        Assert.Equal(NodeKind.Recipe, machine.Kind);
+        Assert.Equal("Iron Ingot", machine.Name);
+        Assert.Equal(NodeKind.Outpost, outpost.Kind);
+
+        // Neither call pushed a command: one undo rewinds straight past them
+        // to the outpost's AddNode.
+        editor.Commands.Undo();
+        Assert.DoesNotContain(outpost, editor.Graph.Nodes);
+    }
+
+    [Fact]
     public void Entering_an_outpost_marks_it_on_the_document()
     {
         var editor = new FactoryEditor(TestData.Database);

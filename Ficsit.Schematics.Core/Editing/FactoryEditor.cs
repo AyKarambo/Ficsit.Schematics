@@ -267,6 +267,28 @@ public sealed class FactoryEditor
         return outpost;
     }
 
+    /// <summary>
+    /// Flip a container between Outpost and Blueprint as one undoable step. Kind and Name
+    /// change together: saves carry no Kind field — <see cref="SfmdSerializer.KindFor"/>
+    /// derives it from the name on load — so a kind-only flip would not round-trip.
+    /// </summary>
+    public void SetOutpostKind(FactoryNode node, bool blueprint)
+    {
+        if (node.Kind is not (NodeKind.Outpost or NodeKind.Blueprint)) return;
+        var newKind = blueprint ? NodeKind.Blueprint : NodeKind.Outpost;
+        if (node.Kind == newKind) return;
+
+        var oldKind = node.Kind;
+        var oldName = node.Name;
+        var newName = blueprint ? "Blueprint" : "Outpost";
+        Commands.Push(new EditCommand
+        {
+            Label = blueprint ? "To Blueprint" : "To Outpost",
+            Apply = () => { node.Kind = newKind; node.Name = newName; },
+            Revert = () => { node.Kind = oldKind; node.Name = oldName; },
+        });
+    }
+
     public void MoveNodes(IReadOnlyList<FactoryNode> nodes, double deltaX, double deltaY, bool coalesce = true)
     {
         if (nodes.Count == 0 || (deltaX == 0 && deltaY == 0)) return;

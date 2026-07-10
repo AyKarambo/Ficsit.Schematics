@@ -257,6 +257,26 @@ public class SfmdSerializerTests
     }
 
     [Fact]
+    public void Blueprint_kind_roundtrips_with_membership_and_active_state()
+    {
+        // A toggled container: Name "Blueprint" carries the kind through the save
+        // (no Kind field is written), members and the active view stay attached.
+        var doc = new FactoryDocument();
+        var blueprint = new FactoryNode { Name = "Blueprint", Kind = NodeKind.Blueprint, Title = "Stamp" };
+        var inner = new FactoryNode { Name = "Iron Ingot", Parent = blueprint };
+        doc.Root.Nodes.AddRange([blueprint, inner]);
+        doc.ActiveOutpost = blueprint;
+
+        var reloaded = SfmdSerializer.Deserialize(SfmdSerializer.Serialize(doc));
+
+        var rb = reloaded.Root.Nodes.Single(n => n.Name == "Blueprint");
+        Assert.Equal(NodeKind.Blueprint, rb.Kind);
+        Assert.Equal("Stamp", rb.Title);
+        Assert.Same(rb, reloaded.Root.Nodes.Single(n => n.Name == "Iron Ingot").Parent);
+        Assert.Same(rb, reloaded.ActiveOutpost);
+    }
+
+    [Fact]
     public void Generator_node_roundtrips_as_a_unified_machine()
     {
         var doc = new FactoryDocument();
