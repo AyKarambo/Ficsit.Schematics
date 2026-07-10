@@ -19,7 +19,8 @@ public static class TestData
 
     public static string IconsDir => Path.Combine(RepoRoot, "Resources", "Raw", "icons");
     public static string CustomIconsDir => Path.Combine(RepoRoot, "Resources", "Raw", "custom_icons");
-    public static string ReferenceSavePath => Path.Combine(RepoRoot, "_reference", "save_backup", "save.sfmd");
+    public static string ReferenceSavePath =>
+        Path.Combine(RepoRoot, "Ficsit.Schematics.Tests", "Fixtures", "reference-save.sfmd");
 
     private static readonly Lazy<GameDatabase> DatabaseLazy = new(GameDataCatalog.BuildDatabase);
 
