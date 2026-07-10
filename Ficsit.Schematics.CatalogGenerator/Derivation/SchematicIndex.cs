@@ -16,8 +16,6 @@ public sealed partial class SchematicIndex
     private static partial Regex HubUpgradePattern();
 
     private readonly Dictionary<string, Tier> _recipeTier = new(StringComparer.Ordinal);
-    private readonly Dictionary<string, Tier> _scannerTier = new(StringComparer.Ordinal);
-    private readonly HashSet<string> _alternateRecipes = new(StringComparer.Ordinal);
     private readonly HashSet<string> _ficsmasRecipes = new(StringComparer.Ordinal);
 
     public SchematicIndex(DocsExport export)
@@ -46,37 +44,20 @@ public sealed partial class SchematicIndex
         foreach (var schematic in schematics.Where(s => s.ClassName == "Schematic_StartingRecipes_C"))
             Record(schematic, new Tier(0, 0));
 
-        // Tier-less schematics still tell us which recipes are alternates / FICSMAS content.
+        // Tier-less event schematics still tell us which recipes are FICSMAS content.
         foreach (var schematic in schematics)
-        {
-            var isAlternate = schematic.String("mType") == "EST_Alternate";
-            var isFicsmas = (schematic.String("mRelevantEvents") ?? "").Contains("Christmas", StringComparison.Ordinal);
-            if (!isAlternate && !isFicsmas) continue;
-            foreach (var recipe in UnlockedRecipes(schematic))
-            {
-                if (isAlternate) _alternateRecipes.Add(recipe);
-                if (isFicsmas) _ficsmasRecipes.Add(recipe);
-            }
-        }
+            if ((schematic.String("mRelevantEvents") ?? "").Contains("Christmas", StringComparison.Ordinal))
+                _ficsmasRecipes.UnionWith(UnlockedRecipes(schematic));
     }
 
+    // Scanner unlocks (BP_UnlockScannableResource_C) are deliberately ignored: the game
+    // re-adds ores to the scanner at arbitrary later milestones, so they say nothing about
+    // availability. Extraction gating lives in Overrides.OreGates instead.
     private void Record(DocsEntry schematic, Tier tier)
     {
-        foreach (var unlock in schematic.Objects("mUnlocks"))
-            switch (unlock.UnlockClass)
-            {
-                case "BP_UnlockRecipe_C":
-                    foreach (var recipe in UeText.ClassNames(unlock.String("mRecipes")))
-                        if (!_recipeTier.TryGetValue(recipe, out var existing) || tier.CompareTo(existing) < 0)
-                            _recipeTier[recipe] = tier;
-                    break;
-                case "BP_UnlockScannableResource_C":
-                    foreach (var resource in UeText.ClassNames(unlock.String("mResourcePairsToAddToScanner"))
-                                 .Concat(UeText.ClassNames(unlock.String("mResourcesToAddToScanner"))))
-                        if (!_scannerTier.TryGetValue(resource, out var existing) || tier.CompareTo(existing) < 0)
-                            _scannerTier[resource] = tier;
-                    break;
-            }
+        foreach (var recipe in UnlockedRecipes(schematic))
+            if (!_recipeTier.TryGetValue(recipe, out var existing) || tier.CompareTo(existing) < 0)
+                _recipeTier[recipe] = tier;
     }
 
     private static IEnumerable<string> UnlockedRecipes(DocsEntry schematic)
@@ -87,12 +68,6 @@ public sealed partial class SchematicIndex
     /// <summary>The milestone/HUB tier that unlocks a recipe class, if any.</summary>
     public Tier? RecipeTier(string recipeClass)
         => _recipeTier.TryGetValue(recipeClass, out var tier) ? tier : (Tier?)null;
-
-    /// <summary>The milestone/HUB tier that adds a resource to the scanner, if any.</summary>
-    public Tier? ScannerTier(string resourceClass)
-        => _scannerTier.TryGetValue(resourceClass, out var tier) ? tier : (Tier?)null;
-
-    public bool IsAlternate(string recipeClass) => _alternateRecipes.Contains(recipeClass);
 
     public bool IsFicsmas(string recipeClass) => _ficsmasRecipes.Contains(recipeClass);
 }

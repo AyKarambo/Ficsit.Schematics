@@ -52,10 +52,6 @@ public sealed class DocsExport
     public DocsGroup? Group(string shortName)
         => Groups.FirstOrDefault(g => g.ShortName == shortName);
 
-    /// <summary>All entries of the groups whose short name matches any of <paramref name="shortNames"/>.</summary>
-    public IEnumerable<DocsEntry> Entries(params string[] shortNames)
-        => Groups.Where(g => shortNames.Contains(g.ShortName)).SelectMany(g => g.Entries);
-
     /// <summary>"…FactoryGame.FGRecipe'" → "FGRecipe".</summary>
     private static string ShortName(string nativeClass)
     {
