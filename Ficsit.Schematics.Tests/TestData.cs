@@ -22,7 +22,5 @@ public static class TestData
     public static string ReferenceSavePath =>
         Path.Combine(RepoRoot, "Ficsit.Schematics.Tests", "Fixtures", "reference-save.sfmd");
 
-    private static readonly Lazy<GameDatabase> DatabaseLazy = new(GameDataCatalog.BuildDatabase);
-
-    public static GameDatabase Database => DatabaseLazy.Value;
+    public static GameDatabase Database => GameDataCatalog.Shared;
 }

@@ -24,7 +24,7 @@ public static class MauiProgram
         builder.Logging.AddDebug();
 #endif
 
-        builder.Services.AddSingleton(_ => GameDataCatalog.BuildDatabase());
+        builder.Services.AddSingleton(_ => GameDataCatalog.Shared);
         builder.Services.AddSingleton(_ => new FicsitStore(
             Path.Combine(FileSystem.AppDataDirectory, "ficsit.schematics.db")));
         builder.Services.AddSingleton<AppState>();

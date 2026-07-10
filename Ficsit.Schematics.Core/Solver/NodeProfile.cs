@@ -110,7 +110,7 @@ internal sealed class NodeProfile
     /// <summary>
     /// A unified generator burns whichever fuel is wired in: it runs that fuel's recipe (so a
     /// single connected fuel behaves exactly like the per-fuel recipe — fuel/water in, power out,
-    /// waste out). With no fuel wired it shows the machine's rated power for the entered count.
+    /// waste out). With nothing wired in it shows the machine's rated power for the entered count.
     /// </summary>
     private static void BuildGeneratorProfile(NodeProfile profile, FactoryNode node, GameDatabase data, FactoryDocument document)
     {
@@ -131,13 +131,20 @@ internal sealed class NodeProfile
     }
 
     /// <summary>The recipe a generator runs: the one whose fuel (its first input) is wired in.
-    /// The first connected fuel wins when several are present.</summary>
+    /// When several fuels are connected, the first matching recipe in catalog order wins —
+    /// not the order in which the fuels were wired. When no fuel is wired but another input
+    /// is (only water reaches a coal generator whose coal is supplied off-canvas), the first
+    /// catalog-order recipe with any wired input runs, so the wired input keeps flowing and
+    /// the missing fuel surfaces as unmade demand instead of a dead connection.</summary>
     private static RecipeDefinition? SelectGeneratorRecipe(FactoryNode node, GameDatabase data, FactoryDocument document)
     {
         var connected = document.Root.Connections
             .Where(c => c.To == node).Select(c => c.Part).ToHashSet();
-        return data.Document.Recipes.FirstOrDefault(
-            r => r.Machine == node.Name && r.Inputs.FirstOrDefault() is { } fuel && connected.Contains(fuel.Part));
+        if (connected.Count == 0) return null;
+        var candidates = data.Document.Recipes.Where(r => r.Machine == node.Name).ToList();
+        return candidates.FirstOrDefault(
+                r => r.Inputs.FirstOrDefault() is { } fuel && connected.Contains(fuel.Part))
+            ?? candidates.FirstOrDefault(r => r.Inputs.Any(i => connected.Contains(i.Part)));
     }
 
     private static void BuildRecipeProfile(NodeProfile profile, FactoryNode node, GameDatabase data, FactoryDocument document)

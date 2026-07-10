@@ -33,6 +33,19 @@ public class FactoryEditorTests
     }
 
     [Fact]
+    public void AddNode_places_the_unified_generator_for_a_per_fuel_recipe_name()
+    {
+        // Auto-Plan materializes planner rows by recipe name, including per-fuel generator
+        // recipes. Those must land as the unified generator (like the save importer and the
+        // serializer's legacy migration), not as a Recipe node the next load would rewrite.
+        var editor = new FactoryEditor(TestData.Database);
+        var node = editor.AddNode("Turbofuel Generator", 0, 0);
+
+        Assert.Equal(NodeKind.Generator, node.Kind);
+        Assert.Equal("Fuel-Powered Generator", node.Name);
+    }
+
+    [Fact]
     public void GroupIntoOutpost_undo_restores_the_graph()
     {
         var editor = new FactoryEditor(TestData.Database);
