@@ -23,8 +23,9 @@ public sealed class FactoryEditor
     public FactoryGraph Graph => Document.Root;
 
     /// <summary>The outpost currently focused; null = root canvas. A view filter only —
-    /// all nodes live in one flat list and group via <see cref="FactoryNode.Parent"/>.</summary>
-    public FactoryNode? ActiveOutpost { get; private set; }
+    /// all nodes live in one flat list and group via <see cref="FactoryNode.Parent"/>.
+    /// Lives on the document so the focused view survives save/reload.</summary>
+    public FactoryNode? ActiveOutpost => Document.ActiveOutpost;
 
     /// <summary>Nodes visible in the current scope = direct members of the active outpost.</summary>
     public IEnumerable<FactoryNode> VisibleNodes => Document.Root.MembersOf(ActiveOutpost);
@@ -61,7 +62,11 @@ public sealed class FactoryEditor
     public void LoadDocument(FactoryDocument document)
     {
         Document = document;
-        ActiveOutpost = null;
+        // Restore the saved view scope, but only while it still resolves to an
+        // outpost/blueprint in the graph — anything stale opens at the root view.
+        if (document.ActiveOutpost is not { Kind: NodeKind.Outpost or NodeKind.Blueprint } active
+            || !document.Root.Nodes.Contains(active))
+            document.ActiveOutpost = null;
         Commands.Clear();
         DocumentReplaced?.Invoke();
         Resolve();
@@ -71,7 +76,7 @@ public sealed class FactoryEditor
     public void EnterOutpost(FactoryNode outpost)
     {
         if (outpost.Kind is not (NodeKind.Outpost or NodeKind.Blueprint)) return;
-        ActiveOutpost = outpost;
+        Document.ActiveOutpost = outpost;
         DocumentReplaced?.Invoke();
     }
 
@@ -79,7 +84,7 @@ public sealed class FactoryEditor
     public void LeaveOutpost()
     {
         if (ActiveOutpost is null) return;
-        ActiveOutpost = ActiveOutpost.Parent;
+        Document.ActiveOutpost = ActiveOutpost.Parent;
         DocumentReplaced?.Invoke();
     }
 

@@ -51,6 +51,60 @@ public class FactoryEditorTests
 
 
     [Fact]
+    public void LoadDocument_restores_the_saved_active_outpost()
+    {
+        var doc = new FactoryDocument();
+        var outpost = new FactoryNode { Name = "Outpost", Kind = NodeKind.Outpost };
+        var inner = new FactoryNode { Name = "Iron Ingot", Parent = outpost };
+        doc.Root.Nodes.AddRange([outpost, inner]);
+        doc.ActiveOutpost = outpost;
+
+        var editor = new FactoryEditor(TestData.Database);
+        editor.LoadDocument(doc);
+
+        Assert.Same(outpost, editor.ActiveOutpost);
+        Assert.Equal([outpost], editor.ScopePath);      // breadcrumb shows the outpost
+        Assert.Contains(inner, editor.VisibleNodes);    // its members fill the canvas
+
+        editor.LeaveOutpost();                          // back affordance returns to root
+        Assert.Null(editor.ActiveOutpost);
+        Assert.Null(doc.ActiveOutpost);                 // and the document tracks it
+    }
+
+    [Fact]
+    public void LoadDocument_falls_back_to_root_for_a_stale_active_outpost()
+    {
+        // Not in the graph at all.
+        var doc = new FactoryDocument();
+        doc.Root.Nodes.Add(new FactoryNode { Name = "Iron Ingot" });
+        doc.ActiveOutpost = new FactoryNode { Name = "Outpost", Kind = NodeKind.Outpost };
+
+        var editor = new FactoryEditor(TestData.Database);
+        editor.LoadDocument(doc);
+        Assert.Null(editor.ActiveOutpost);
+
+        // In the graph, but not an outpost/blueprint.
+        var doc2 = new FactoryDocument();
+        var machine = new FactoryNode { Name = "Iron Ingot" };
+        doc2.Root.Nodes.Add(machine);
+        doc2.ActiveOutpost = machine;
+
+        editor.LoadDocument(doc2);
+        Assert.Null(editor.ActiveOutpost);
+    }
+
+    [Fact]
+    public void Entering_an_outpost_marks_it_on_the_document()
+    {
+        var editor = new FactoryEditor(TestData.Database);
+        editor.LoadDocument(new FactoryDocument());
+        var outpost = editor.AddNode("Outpost", 0, 0);
+
+        editor.EnterOutpost(outpost);
+        Assert.Same(outpost, editor.Document.ActiveOutpost); // save/reload will restore it
+    }
+
+    [Fact]
     public void SuspendSolve_collapses_a_bulk_edit_into_one_solve()
     {
         var editor = new FactoryEditor(TestData.Database);
