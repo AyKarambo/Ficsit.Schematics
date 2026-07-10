@@ -42,6 +42,12 @@ $tfm = 'net10.0-windows10.0.19041.0'
 $publishDir = Join-Path $repoRoot 'bin/publish/win-x64'
 
 if (-not $SkipPublish) {
+	# dotnet publish never deletes files that vanished from the app since the last
+	# publish; Product.wxs harvests the whole folder, so stale files would ship.
+	if (Test-Path $publishDir) {
+		Write-Host "Removing previous publish output $publishDir ..."
+		Remove-Item -Recurse -Force $publishDir
+	}
 	Write-Host "Publishing $tfm ($Configuration, win-x64, self-contained) as $Version ..."
 	dotnet publish (Join-Path $repoRoot 'Ficsit.Schematics.csproj') `
 		-f $tfm `
