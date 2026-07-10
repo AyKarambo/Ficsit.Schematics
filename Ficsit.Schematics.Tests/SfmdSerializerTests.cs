@@ -167,6 +167,119 @@ public class SfmdSerializerTests
     }
 
     [Fact]
+    public void Active_outpost_roundtrips_as_a_document_level_index()
+    {
+        var doc = new FactoryDocument();
+        var outpost = new FactoryNode { Name = "Outpost", Kind = NodeKind.Outpost };
+        var inner = new FactoryNode { Name = "Iron Ingot", Parent = outpost };
+        doc.Root.Nodes.AddRange([outpost, inner]);
+        doc.ActiveOutpost = outpost;
+
+        var json = SfmdSerializer.Serialize(doc);
+        Assert.Equal(0, JsonNode.Parse(json)!.AsObject()["Outpost"]!.GetValue<int>());
+
+        var reloaded = SfmdSerializer.Deserialize(json);
+        Assert.NotNull(reloaded.ActiveOutpost);
+        Assert.Same(reloaded.Root.Nodes.Single(n => n.Kind == NodeKind.Outpost), reloaded.ActiveOutpost);
+    }
+
+    [Fact]
+    public void Root_view_omits_the_outpost_field()
+    {
+        var doc = new FactoryDocument();
+        doc.Root.Nodes.Add(new FactoryNode { Name = "Outpost", Kind = NodeKind.Outpost });
+
+        var exported = JsonNode.Parse(SfmdSerializer.Serialize(doc))!.AsObject();
+        Assert.False(exported.ContainsKey("Outpost"));
+        Assert.Null(SfmdSerializer.Deserialize(SfmdSerializer.Serialize(doc)).ActiveOutpost);
+    }
+
+    [Fact]
+    public void Dangling_active_outpost_is_not_written()
+    {
+        // Focused outpost deleted before saving: the reference is no longer in the graph.
+        var doc = new FactoryDocument();
+        doc.Root.Nodes.Add(new FactoryNode { Name = "Iron Ingot" });
+        doc.ActiveOutpost = new FactoryNode { Name = "Outpost", Kind = NodeKind.Outpost };
+
+        var exported = JsonNode.Parse(SfmdSerializer.Serialize(doc))!.AsObject();
+        Assert.False(exported.ContainsKey("Outpost"));
+    }
+
+    [Fact]
+    public void Reference_save_with_an_outpost_field_opens_inside_it()
+    {
+        const string json = """
+            {"Version":"1.0","Outpost":1,"Data":[
+              {"Name":"Iron Ore","X":0,"Y":0,"Max":"60"},
+              {"Name":"Outpost","X":50,"Y":0},
+              {"Name":"Iron Ingot","X":80,"Y":0,"Parent":1,"Inputs":{"Iron Ore":[0]}}
+            ]}
+            """;
+        var doc = SfmdSerializer.Deserialize(json);
+
+        Assert.NotNull(doc.ActiveOutpost);
+        Assert.Same(doc.Root.Nodes.Single(n => n.Kind == NodeKind.Outpost), doc.ActiveOutpost);
+    }
+
+    [Theory]
+    [InlineData(99)] // out of range
+    [InlineData(-3)] // negative
+    [InlineData(0)]  // resolves, but to an ordinary machine
+    public void Stale_outpost_index_degrades_to_the_root_view(int index)
+    {
+        var json = $$"""
+            {"Version":"1.0","Outpost":{{index}},"Data":[
+              {"Name":"Iron Ore","X":0,"Y":0},
+              {"Name":"Outpost","X":50,"Y":0}
+            ]}
+            """;
+        var doc = SfmdSerializer.Deserialize(json);
+
+        Assert.Null(doc.ActiveOutpost);
+        Assert.Equal(2, doc.Root.Nodes.Count); // the load itself succeeded
+    }
+
+    [Fact]
+    public void Outpost_index_pointing_at_a_migrated_legacy_handle_degrades_to_root()
+    {
+        // Index 2 is an Import handle that BypassLegacyHandles removes; the as-read index
+        // must not silently rebind to a shifted node — it degrades to the root view.
+        const string json = """
+            {"Version":"1.0","Outpost":2,"Data":[
+              {"Name":"Iron Ore","X":0,"Y":0,"Max":"60"},
+              {"Name":"Outpost","X":50,"Y":0},
+              {"Name":"Iron Ore","X":40,"Y":0,"Kind":"Import","Parent":1,"Inputs":{"Iron Ore":[0]}},
+              {"Name":"Iron Ingot","X":80,"Y":0,"Parent":1,"Inputs":{"Iron Ore":[2]}}
+            ]}
+            """;
+        var doc = SfmdSerializer.Deserialize(json);
+
+        Assert.Null(doc.ActiveOutpost);
+        Assert.Equal(3, doc.Root.Nodes.Count); // handle migrated away as usual
+    }
+
+    [Fact]
+    public void Blueprint_kind_roundtrips_with_membership_and_active_state()
+    {
+        // A toggled container: Name "Blueprint" carries the kind through the save
+        // (no Kind field is written), members and the active view stay attached.
+        var doc = new FactoryDocument();
+        var blueprint = new FactoryNode { Name = "Blueprint", Kind = NodeKind.Blueprint, Title = "Stamp" };
+        var inner = new FactoryNode { Name = "Iron Ingot", Parent = blueprint };
+        doc.Root.Nodes.AddRange([blueprint, inner]);
+        doc.ActiveOutpost = blueprint;
+
+        var reloaded = SfmdSerializer.Deserialize(SfmdSerializer.Serialize(doc));
+
+        var rb = reloaded.Root.Nodes.Single(n => n.Name == "Blueprint");
+        Assert.Equal(NodeKind.Blueprint, rb.Kind);
+        Assert.Equal("Stamp", rb.Title);
+        Assert.Same(rb, reloaded.Root.Nodes.Single(n => n.Name == "Iron Ingot").Parent);
+        Assert.Same(rb, reloaded.ActiveOutpost);
+    }
+
+    [Fact]
     public void Generator_node_roundtrips_as_a_unified_machine()
     {
         var doc = new FactoryDocument();

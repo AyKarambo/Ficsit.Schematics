@@ -280,6 +280,23 @@ public class SolverTests
     }
 
     [Fact]
+    public void Blueprint_container_is_as_inert_as_an_outpost()
+    {
+        // The Blueprint kind flip is flow-invariant: like an outpost, the container is a
+        // bracket, and its member solves exactly as before the flip.
+        var doc = new FactoryDocument();
+        var blueprint = Node(doc, "Blueprint");
+        var miner = Node(doc, "Iron Ore", "60");
+        var smelter = Node(doc, "Iron Ingot");
+        smelter.Parent = blueprint;
+        Connect(doc, miner, "Iron Ore", smelter);
+
+        var result = Solve(doc);
+        Assert.Equal(Rational.Zero, result.For(blueprint).Count);
+        Assert.Equal(new Rational(2), result.For(smelter).Count);
+    }
+
+    [Fact]
     public void Deleting_an_outpost_deletes_its_members()
     {
         var doc = new FactoryDocument();

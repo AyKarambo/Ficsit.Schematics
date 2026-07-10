@@ -63,6 +63,12 @@ public static class SfmdSerializer
             ["PowerMultiplier"] = document.PowerMultiplier,
             ["Data"] = SerializeGraph(document.Root),
         };
+        // Document-level active view: the outpost the canvas is focused on, as its index in
+        // the flat Data array (the reference app's "Outpost" field). Omitted at root — and
+        // when the node is gone (e.g. deleted while focused), so no dangling index is written.
+        if (document.ActiveOutpost is { } active
+            && document.Root.Nodes.IndexOf(active) is var activeIndex and >= 0)
+            root["Outpost"] = activeIndex;
         return root.ToJsonString(WriteOptions);
     }
 
@@ -178,15 +184,30 @@ public static class SfmdSerializer
         };
 
         if (root["Data"] is JsonArray data)
-            document.Root = DeserializeGraph(data);
+        {
+            document.Root = DeserializeGraph(data, out var readOrder);
+
+            // Document-level active view: restore only an index that still resolves to an
+            // outpost/blueprint in the graph. Anything stale — out of range, pointing at an
+            // ordinary machine, or at a migrated-away legacy handle — degrades to the root
+            // view rather than failing the load.
+            var activeIndex = (int)GetDouble(root["Outpost"], -1);
+            if (activeIndex >= 0 && activeIndex < readOrder.Count
+                && readOrder[activeIndex] is { Kind: NodeKind.Outpost or NodeKind.Blueprint } active
+                && document.Root.Nodes.Contains(active))
+                document.ActiveOutpost = active;
+        }
         return document;
     }
 
-    private static FactoryGraph DeserializeGraph(JsonArray data)
+    private static FactoryGraph DeserializeGraph(JsonArray data, out List<FactoryNode> readOrder)
     {
         var graph = new FactoryGraph();
         var legacyHandles = new List<FactoryNode>();
         ReadArray(data, graph, parent: null, legacyHandles);
+        // The flat as-read order — captured before the legacy-handle migration removes
+        // nodes and shifts positions, so document-level indices resolve as written.
+        readOrder = graph.Nodes.ToList();
         BypassLegacyHandles(graph, legacyHandles);
         return graph;
     }

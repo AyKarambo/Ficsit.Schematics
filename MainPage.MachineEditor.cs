@@ -98,6 +98,13 @@ public partial class MainPage
         var isRecipe = node.Kind == NodeKind.Recipe
             && Data.RecipesByName.TryGetValue(node.Name, out _);
 
+        // Outposts/blueprints: Open (enter, same as double-click) and the kind toggle.
+        var isContainer = node.Kind is NodeKind.Outpost or NodeKind.Blueprint;
+        PopupOpenRow.IsVisible = isContainer;
+        PopupBlueprintRow.IsVisible = isContainer;
+        if (isContainer)
+            PopupBlueprintSwitch.IsToggled = node.Kind == NodeKind.Blueprint;
+
         // Every recipe this machine can run — the fuel selector on generators,
         // a recipe switcher everywhere else.
         PopupRecipeRow.IsVisible = false;
@@ -172,6 +179,25 @@ public partial class MainPage
 
         PopupPasteButton.IsEnabled = _state.Editor.CanPaste;
         _popupLoading = false;
+    }
+
+    /// <summary>Context-menu "Open": enter the outpost, same as double-clicking its box.</summary>
+    private void OnPopupOpenClicked(object? sender, EventArgs e)
+    {
+        if (_popupNode is null) return;
+        var node = _popupNode;
+        MachinePopup.IsVisible = false;
+        _popupNode = null;
+        _state.ClearSelection();
+        _state.Editor.EnterOutpost(node);
+    }
+
+    /// <summary>Context-menu "Blueprint": flip the container kind (undoable).</summary>
+    private void OnBlueprintToggled(object? sender, ToggledEventArgs e)
+    {
+        if (_popupLoading || _popupNode is null) return;
+        _state.Editor.SetOutpostKind(_popupNode, e.Value);
+        PopulateMachinePopup(_popupNode); // icon + name follow the kind
     }
 
     private void OnPopupRecipeChanged(object? sender, EventArgs e)
