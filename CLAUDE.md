@@ -27,6 +27,14 @@ dotnet build Ficsit.Schematics.csproj -f net10.0-windows10.0.19041.0
 dotnet build Ficsit.Schematics.csproj -t:Run -f net10.0-windows10.0.19041.0
 ```
 
+## Release
+
+Push a `v*` tag → `.github/workflows/release.yml` tests, builds the WiX MSI
+(`installer/build-installer.ps1`) and uploads it **unsigned** to a **draft**
+GitHub Release; the maintainer then signs + publishes locally with
+`installer/sign-release.ps1` (Certum SimplySign only works on the maintainer's
+machine — never try to sign in CI). Full runbook: `installer/README.md`.
+
 ## Architecture
 
 ```
