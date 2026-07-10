@@ -188,6 +188,42 @@ public class SaveImportTests
     }
 
     [Fact]
+    public void A_stem_naming_a_renamed_recipe_resolves_through_the_alias_table()
+    {
+        // The default screw recipe's stem stays "Screw" in every save, while the catalog
+        // recipe was renamed to "Screws" — the legacy name must keep resolving on import
+        // (per-actor path), not fall back to the machine's first recipe.
+        var world = new SaveWorld
+        {
+            Buildings = [new SaveBuilding { ClassName = "Build_ConstructorMk1_C", RecipeStem = "Screw" }],
+        };
+
+        var node = Assert.Single(SaveImport.BuildNodes(world, TestData.Database));
+        Assert.Equal("Screws", node.Name);
+    }
+
+    [Fact]
+    public void A_queued_stem_naming_a_renamed_recipe_resolves_through_the_alias_table()
+    {
+        // Legacy-save path (no per-actor stems): a "Screw" stem dropped from the ordered
+        // queue would shift every later constructor's recipe by one.
+        var world = new SaveWorld
+        {
+            Buildings =
+            [
+                new SaveBuilding { ClassName = "Build_ConstructorMk1_C" },
+                new SaveBuilding { ClassName = "Build_ConstructorMk1_C", X = 100 },
+            ],
+            RecipeStems = ["Screw", "Cable"],
+        };
+
+        var nodes = SaveImport.BuildNodes(world, TestData.Database);
+        Assert.Equal(2, nodes.Count);
+        Assert.Equal("Screws", nodes[0].Name);
+        Assert.Equal("Cable", nodes[1].Name);
+    }
+
+    [Fact]
     public void Production_recipes_correlate_to_machines_in_order()
     {
         // The k-th machine of a type takes the k-th mCurrentRecipe of that type — so a Packager

@@ -1,5 +1,6 @@
 using Ficsit.Schematics.Core.GameData;
 using Ficsit.Schematics.Core.Model;
+using Ficsit.Schematics.Core.Serialization;
 
 namespace Ficsit.Schematics.Core.Saves;
 
@@ -231,7 +232,9 @@ public static class SaveImport
     }
 
     /// <summary>Token-set index over every recipe name (e.g. "packaged|water"), unique matches
-    /// only — how a save recipe stem finds its catalog recipe.</summary>
+    /// only — how a save recipe stem finds its catalog recipe. Legacy names from the alias
+    /// table index onto the official recipe too (never shadowing a live key), so a save stem
+    /// that still matches a pre-rename name (e.g. "Screw" → "Screws") keeps resolving.</summary>
     private static Dictionary<string, string?> RecipeTokenIndex(GameDatabase data)
     {
         var byToken = new Dictionary<string, string?>();
@@ -240,6 +243,9 @@ public static class SaveImport
             var key = SchematicRecipeMap.TokenKey(recipe.Name);
             byToken[key] = byToken.ContainsKey(key) ? null : recipe.Name;
         }
+        foreach (var (legacy, official) in NameAliases.ByLegacyName)
+            if (data.RecipesByName.ContainsKey(official))
+                byToken.TryAdd(SchematicRecipeMap.TokenKey(legacy), official);
         return byToken;
     }
 
