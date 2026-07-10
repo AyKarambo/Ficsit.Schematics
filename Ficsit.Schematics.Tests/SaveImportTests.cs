@@ -116,6 +116,39 @@ public class SaveImportTests
     }
 
     [Fact]
+    public void Train_route_bridges_machines_across_freight_platforms_as_a_tagged_connection()
+    {
+        const string miner = "L:PersistentLevel.Build_MinerMk1_C_1";
+        const string smelter = "L:PersistentLevel.Build_SmelterMk1_C_2";
+        const string dockA = "L:PersistentLevel.Build_TrainDockingStation_C_3";
+        const string dockB = "L:PersistentLevel.Build_TrainDockingStationLiquid_C_4";
+        var world = new SaveWorld
+        {
+            Buildings =
+            [
+                new SaveBuilding { ClassName = "Build_MinerMk1_C", Instance = miner },
+                new SaveBuilding { ClassName = "Build_SmelterMk1_C", Instance = smelter, X = 90_000 },
+            ],
+            ResourceNodes = [Node("node1", "Iron Ore", "Normal", 0, 0)],
+            // The miner belt-feeds platform A; platform B belt-feeds the smelter. Only the
+            // train route (from a timetable over both platforms' stations) bridges them.
+            ComponentLinks = new Dictionary<string, string>
+            {
+                [miner + ".Output0"] = dockA + ".Input0",
+                [dockB + ".Output0"] = smelter + ".Input0",
+            },
+            VehicleRoutes = [new SaveVehicleRoute(LogisticsKind.Train, [dockA, dockB])],
+        };
+
+        var (nodes, connections) = SaveImport.Build(world, TestData.Database);
+
+        Assert.Equal(2, nodes.Count); // the platforms themselves are not nodes
+        var link = Assert.Single(connections);
+        Assert.Equal("Iron Ore", link.Part);
+        Assert.Equal(LogisticsKind.Train, link.Logistics);
+    }
+
+    [Fact]
     public void Belt_connections_stay_plain_when_a_route_retraces_them()
     {
         const string smelter = "L:PersistentLevel.Build_SmelterMk1_C_1";

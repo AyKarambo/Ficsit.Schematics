@@ -83,6 +83,137 @@ public class SaveWorldScanTests
         Assert.Equal([droneA, droneB], drone.Stations.OrderBy(s => s, StringComparer.Ordinal));
     }
 
+    [Fact]
+    public void Scans_timetables_identifiers_and_platform_connections()
+    {
+        const string stationA = "Persistent_Level:PersistentLevel.Build_TrainStation_C_100";
+        const string stationB = "Persistent_Level:PersistentLevel.Build_TrainStation_C_200";
+        const string dockA = "Persistent_Level:PersistentLevel.Build_TrainDockingStation_C_110";
+        const string idA = "Persistent_Level:PersistentLevel.FGTrainStationIdentifier_101";
+        const string idB = "Persistent_Level:PersistentLevel.FGTrainStationIdentifier_201";
+        const string timetable = "Persistent_Level:PersistentLevel.FGRailroadTimeTable_300";
+        const string decoy = "Fake_Level:PersistentLevel.Build_TrainStation_C_999";
+
+        var scan = SatisfactorySaveReader.ScanObjectDataFromBody(AssembleBody(
+            (w => WriteObjectToc(w, "/Script/FactoryGame.FGRailroadTimeTable", timetable,
+                "Persistent_Level:PersistentLevel"),
+                [.. ObjectRefProperty("Station", idA), .. ObjectRefProperty("Station", idB)]),
+            // The identifier carries mStationName too; a decoy *before* mStation proves the scan
+            // matches the exact property name (mStation) rather than the mStationName prefix.
+            (w => WriteObjectToc(w, "/Script/FactoryGame.FGTrainStationIdentifier", idA,
+                "Persistent_Level:PersistentLevel"),
+                [.. ObjectRefProperty("mStationName", decoy), .. ObjectRefProperty("mStation", stationA)]),
+            (w => WriteObjectToc(w, "/Script/FactoryGame.FGTrainStationIdentifier", idB,
+                "Persistent_Level:PersistentLevel"),
+                ObjectRefProperty("mStation", stationB)),
+            (w => WriteObjectToc(w, "/Script/FactoryGame.FGTrainPlatformConnection",
+                stationA + ".PlatformConnection0", stationA),
+                ObjectRefProperty("mConnectedTo", dockA + ".PlatformConnection0")),
+            (w => WriteObjectToc(w, "/Script/FactoryGame.FGTrainPlatformConnection",
+                dockA + ".PlatformConnection0", dockA),
+                ObjectRefProperty("mConnectedTo", stationA + ".PlatformConnection0"))));
+
+        Assert.Equal([idA, idB], scan.TimetableStops[timetable]);
+        Assert.Equal(stationA, scan.StationOfIdentifier[idA]); // not the decoy
+        Assert.Equal(stationB, scan.StationOfIdentifier[idB]);
+        Assert.Equal(dockA + ".PlatformConnection0", scan.PlatformLinks[stationA + ".PlatformConnection0"]);
+        Assert.Equal(stationA + ".PlatformConnection0", scan.PlatformLinks[dockA + ".PlatformConnection0"]);
+    }
+
+    private const string TrainStationCls =
+        "/Game/FactoryGame/Buildable/Factory/Train/Station/Build_TrainStation.Build_TrainStation_C";
+    private const string DockCls =
+        "/Game/FactoryGame/Buildable/Factory/Train/Station/Build_TrainDockingStation.Build_TrainDockingStation_C";
+    private const string LiquidDockCls =
+        "/Game/FactoryGame/Buildable/Factory/Train/StationLiquid/Build_TrainDockingStationLiquid.Build_TrainDockingStationLiquid_C";
+    private const string StationA = "Persistent_Level:PersistentLevel.Build_TrainStation_C_100";
+    private const string StationB = "Persistent_Level:PersistentLevel.Build_TrainStation_C_200";
+    private const string DockA = "Persistent_Level:PersistentLevel.Build_TrainDockingStation_C_110";
+    private const string DockB = "Persistent_Level:PersistentLevel.Build_TrainDockingStationLiquid_C_210";
+    private const string IdA = "Persistent_Level:PersistentLevel.FGTrainStationIdentifier_101";
+    private const string IdB = "Persistent_Level:PersistentLevel.FGTrainStationIdentifier_201";
+
+    [Fact]
+    public void Reads_a_train_timetable_into_a_route_of_freight_platforms()
+    {
+        var world = SatisfactorySaveReader.ReadWorldFromBody(TrainBody(stops: [IdA, IdB]));
+
+        var route = Assert.Single(world.VehicleRoutes, r => r.Kind == LogisticsKind.Train);
+        // The route's stations are the *freight platforms* in stop order — cargo flows through
+        // them, not the station buildings; the liquid variant participates symmetrically.
+        Assert.Equal([DockA, DockB], route.Stations);
+    }
+
+    [Fact]
+    public void A_dangling_timetable_stop_is_skipped_and_the_route_still_forms()
+    {
+        const string ghost = "Persistent_Level:PersistentLevel.FGTrainStationIdentifier_999";
+        var world = SatisfactorySaveReader.ReadWorldFromBody(TrainBody(stops: [IdA, ghost, IdB]));
+
+        var route = Assert.Single(world.VehicleRoutes, r => r.Kind == LogisticsKind.Train);
+        Assert.Equal([DockA, DockB], route.Stations);
+    }
+
+    [Fact]
+    public void A_single_resolvable_station_yields_no_train_route()
+    {
+        const string ghost = "Persistent_Level:PersistentLevel.FGTrainStationIdentifier_999";
+        var world = SatisfactorySaveReader.ReadWorldFromBody(TrainBody(stops: [IdA, ghost]));
+
+        Assert.DoesNotContain(world.VehicleRoutes, r => r.Kind == LogisticsKind.Train);
+    }
+
+    [Fact]
+    public void Chainless_platforms_fall_back_to_the_nearest_station_within_100m()
+    {
+        // No PlatformConnection objects at all — assignment must come from world positions:
+        // each dock sits a few meters from its station, the stations a kilometer apart.
+        var world = SatisfactorySaveReader.ReadWorldFromBody(AssembleBody(
+            (w => WriteActorToc(w, TrainStationCls, StationA, x: 0f, y: 0f), []),
+            (w => WriteActorToc(w, TrainStationCls, StationB, x: 100_000f, y: 0f), []),
+            (w => WriteActorToc(w, DockCls, DockA, x: 2_000f, y: 0f), []),
+            (w => WriteActorToc(w, LiquidDockCls, DockB, x: 98_000f, y: 0f), []),
+            (w => WriteObjectToc(w, "/Script/FactoryGame.FGTrainStationIdentifier", IdA,
+                "Persistent_Level:PersistentLevel"), ObjectRefProperty("mStation", StationA)),
+            (w => WriteObjectToc(w, "/Script/FactoryGame.FGTrainStationIdentifier", IdB,
+                "Persistent_Level:PersistentLevel"), ObjectRefProperty("mStation", StationB)),
+            (w => WriteObjectToc(w, "/Script/FactoryGame.FGRailroadTimeTable",
+                "Persistent_Level:PersistentLevel.FGRailroadTimeTable_300",
+                "Persistent_Level:PersistentLevel"),
+                [.. ObjectRefProperty("Station", IdA), .. ObjectRefProperty("Station", IdB)])));
+
+        var route = Assert.Single(world.VehicleRoutes, r => r.Kind == LogisticsKind.Train);
+        Assert.Equal([DockA, DockB], route.Stations);
+    }
+
+    /// <summary>A two-station train world: stations with one freight platform each (chained via
+    /// PlatformConnections), their identifiers, and one timetable visiting <paramref name="stops"/>.</summary>
+    private static byte[] TrainBody(string[] stops) => AssembleBody(
+        (w => WriteActorToc(w, TrainStationCls, StationA), []),
+        (w => WriteActorToc(w, TrainStationCls, StationB), []),
+        (w => WriteActorToc(w, DockCls, DockA), []),
+        (w => WriteActorToc(w, LiquidDockCls, DockB), []),
+        (w => WriteObjectToc(w, "/Script/FactoryGame.FGTrainPlatformConnection",
+            StationA + ".PlatformConnection0", StationA),
+            ObjectRefProperty("mConnectedTo", DockA + ".PlatformConnection0")),
+        (w => WriteObjectToc(w, "/Script/FactoryGame.FGTrainPlatformConnection",
+            DockA + ".PlatformConnection0", DockA),
+            ObjectRefProperty("mConnectedTo", StationA + ".PlatformConnection0")),
+        (w => WriteObjectToc(w, "/Script/FactoryGame.FGTrainPlatformConnection",
+            StationB + ".PlatformConnection0", StationB),
+            ObjectRefProperty("mConnectedTo", DockB + ".PlatformConnection0")),
+        (w => WriteObjectToc(w, "/Script/FactoryGame.FGTrainPlatformConnection",
+            DockB + ".PlatformConnection0", DockB),
+            ObjectRefProperty("mConnectedTo", StationB + ".PlatformConnection0")),
+        (w => WriteObjectToc(w, "/Script/FactoryGame.FGTrainStationIdentifier", IdA,
+            "Persistent_Level:PersistentLevel"), ObjectRefProperty("mStation", StationA)),
+        (w => WriteObjectToc(w, "/Script/FactoryGame.FGTrainStationIdentifier", IdB,
+            "Persistent_Level:PersistentLevel"), ObjectRefProperty("mStation", StationB)),
+        (w => WriteObjectToc(w, "/Script/FactoryGame.FGRailroadTimeTable",
+            "Persistent_Level:PersistentLevel.FGRailroadTimeTable_300",
+            "Persistent_Level:PersistentLevel"),
+            stops.SelectMany(s => ObjectRefProperty("Station", s)).ToArray()));
+
     // ------------------------------------------------------------- body builder
 
     private static byte[] BuildBody(float clock) => AssembleBody(
@@ -155,7 +286,8 @@ public class SaveWorldScanTests
         w.Write((byte)0);
     }
 
-    private static void WriteActorToc(BinaryWriter w, string cls, string instance)
+    private static void WriteActorToc(
+        BinaryWriter w, string cls, string instance, float x = 10_000f, float y = 20_000f)
     {
         w.Write(1); // actor entry
         WriteFString(w, cls);
@@ -164,7 +296,7 @@ public class SaveWorldScanTests
         w.Write(0);                                          // flags
         w.Write(0);                                          // needTransform
         w.Write(0f); w.Write(0f); w.Write(0f); w.Write(1f);  // rotation quaternion
-        w.Write(10_000f); w.Write(20_000f); w.Write(300f);   // position (cm)
+        w.Write(x); w.Write(y); w.Write(300f);               // position (cm)
         w.Write(1f); w.Write(1f); w.Write(1f);               // scale
         w.Write(1);                                          // wasPlaced
     }
@@ -221,11 +353,13 @@ public class SaveWorldScanTests
         return ms.ToArray();
     }
 
-    private static byte[] LinkProperty(string target)
+    /// <summary>An ObjectProperty reference: property name, type, size/index pair, pad byte,
+    /// level name, then the target instance path — the framing every ref scan matches.</summary>
+    private static byte[] ObjectRefProperty(string name, string target)
     {
         using var ms = new MemoryStream();
         using var w = new BinaryWriter(ms);
-        WriteFString(w, "mConnectedComponent");
+        WriteFString(w, name);
         WriteFString(w, "ObjectProperty");
         w.Write(0); w.Write(38); w.Write((byte)0);
         WriteFString(w, "Persistent_Level");
@@ -233,6 +367,9 @@ public class SaveWorldScanTests
         w.Flush();
         return ms.ToArray();
     }
+
+    private static byte[] LinkProperty(string target)
+        => ObjectRefProperty("mConnectedComponent", target);
 
     /// <summary>A docking path node's data: the parent-actor ref (its station) followed by the
     /// road-network id property.</summary>
@@ -251,15 +388,5 @@ public class SaveWorldScanTests
     }
 
     private static byte[] PairedStationSpan(string target)
-    {
-        using var ms = new MemoryStream();
-        using var w = new BinaryWriter(ms);
-        WriteFString(w, "mPairedStation");
-        WriteFString(w, "ObjectProperty");
-        w.Write(0); w.Write(38); w.Write((byte)0);
-        WriteFString(w, "Persistent_Level");
-        WriteFString(w, target);
-        w.Flush();
-        return ms.ToArray();
-    }
+        => ObjectRefProperty("mPairedStation", target);
 }

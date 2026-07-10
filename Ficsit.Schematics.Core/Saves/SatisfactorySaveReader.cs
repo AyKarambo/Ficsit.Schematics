@@ -84,6 +84,17 @@ public static class SatisfactorySaveReader
 
         /// <summary>Drone port → its <c>mPairedStation</c> destination port.</summary>
         public Dictionary<string, string> DronePairs { get; } = new(StringComparer.Ordinal);
+
+        /// <summary>Train timetable → the <c>FGTrainStationIdentifier</c> instances of its
+        /// <c>mStops</c>, in stop order (repeat visits repeat the identifier).</summary>
+        public Dictionary<string, List<string>> TimetableStops { get; } = new(StringComparer.Ordinal);
+
+        /// <summary>Station identifier → its <c>mStation</c> actor (<c>Build_TrainStation_C</c>).</summary>
+        public Dictionary<string, string> StationOfIdentifier { get; } = new(StringComparer.Ordinal);
+
+        /// <summary>Platform connection component → the neighboring platform's connection
+        /// component (<c>mConnectedTo</c>); the chain that hangs freight platforms off a station.</summary>
+        public Dictionary<string, string> PlatformLinks { get; } = new(StringComparer.Ordinal);
     }
 
     internal static ObjectDataScan ScanObjectDataFromBody(byte[] body)
@@ -100,8 +111,11 @@ public static class SatisfactorySaveReader
     /// Locate the persistent level's TOC and Data blob contents. Both are int64-length-prefixed
     /// (so the high dword of a real, sub-4 GB length is 0 — binary noise rarely is) and both begin
     /// with the same large <c>int32 numObjects</c>; that match, plus building instances in the TOC,
-    /// pins the pair down without parsing the version-sensitive grid/streaming-level preamble. The
-    /// persistent level has the most objects, so the highest-count match wins.
+    /// narrows the field without parsing the version-sensitive grid/streaming-level preamble. The
+    /// framing checks alone are not enough on large saves — a 107 MB body can contain junk
+    /// length-pairs whose fake spans even include the building marker — so every candidate must
+    /// prove itself by <see cref="TocWalks">actually walking</see>: all of its object headers must
+    /// parse. Among the survivors the highest object count wins (the persistent level has the most).
     /// </summary>
     private static (int TocStart, long TocLen, int DataStart, long DataLen)? FindPersistentLevelBlobs(byte[] body)
     {
@@ -120,13 +134,51 @@ public static class SatisfactorySaveReader
             var dataLen = BitConverter.ToInt64(body, dataPos);
             if (dataLen < 4 || dataPos + 8 + dataLen > body.Length) continue;
             if (BitConverter.ToInt32(body, dataPos + 8) != n1) continue;    // TOC/Data numObjects match
-            if (n1 > bestCount && IndexOf(body, marker, p + 8, p + 8 + (int)tocLen) >= 0)
+            if (n1 > bestCount
+                && TocWalks(body, p + 8, tocLen, n1)
+                && IndexOf(body, marker, p + 8, p + 8 + (int)tocLen) >= 0)
             {
                 best = (p + 8, tocLen, dataPos + 8, dataLen);
                 bestCount = n1;
             }
         }
         return best;
+    }
+
+    /// <summary>True when the TOC blob at <paramref name="tocStart"/> really is a level TOC: all
+    /// <paramref name="count"/> object headers parse without running past its length (a small
+    /// trailing tail after the last header is normal). Junk length-pairs that satisfy the cheap
+    /// framing checks fail within their first header, so the walk is what tells the real
+    /// persistent level from binary noise.</summary>
+    private static bool TocWalks(byte[] body, int tocStart, long tocLen, int count)
+    {
+        var end = (int)Math.Min(tocStart + tocLen, body.Length);
+        var pos = tocStart + 4; // past numObjects
+        for (var i = 0; i < count; i++)
+        {
+            if (pos + 4 > end) return false;
+            var isActor = BitConverter.ToInt32(body, pos); pos += 4;
+            if (isActor is not (0 or 1)) return false;
+            if (!SkipFString(body, ref pos, end)) return false;             // className
+            if (!SkipFString(body, ref pos, end)) return false;             // levelName
+            if (!SkipFString(body, ref pos, end)) return false;             // pathName
+            pos += 4;                                                       // ObjectFlags
+            if (isActor == 1) pos += 4 + 16 + 12 + 12 + 4;                  // transform block
+            else if (!SkipFString(body, ref pos, end)) return false;        // OuterPathName
+        }
+        return pos <= end;
+    }
+
+    /// <summary>Skip one FString (ASCII or UTF-16 framing) staying inside [.., <paramref name="end"/>).</summary>
+    private static bool SkipFString(byte[] body, ref int pos, int end)
+    {
+        if (pos + 4 > end) return false;
+        var len = BitConverter.ToInt32(body, pos); pos += 4;
+        if (len == 0) return true;
+        var bytes = len > 0 ? len : -(long)len * 2;
+        if (bytes > 1 << 20 || pos + bytes > end) return false;
+        pos += (int)bytes;
+        return true;
     }
 
     /// <summary>Walk the TOC blob's object headers in order, returning each object's instance path.
@@ -190,6 +242,21 @@ public static class SatisfactorySaveReader
                 && FindPathAfterMarker(body, pos, dataLen, PairedStationMarker) is { } paired)
                 scan.DronePairs[instance] = paired;
 
+            // Train wiring: a timetable's mStops reference station identifiers, an identifier's
+            // mStation names the station actor, and platform connections chain the freight
+            // platforms onto the station along the track.
+            if (instance.Contains(".FGRailroadTimeTable_", StringComparison.Ordinal))
+                scan.TimetableStops[instance] =
+                    CollectInstancePaths(body, pos, dataLen, ".FGTrainStationIdentifier_");
+
+            if (instance.Contains(".FGTrainStationIdentifier_", StringComparison.Ordinal)
+                && FindPathAfterExactMarker(body, pos, dataLen, StationMarker) is { } stationActor)
+                scan.StationOfIdentifier[instance] = stationActor;
+
+            if (instance.Contains(".PlatformConnection", StringComparison.Ordinal)
+                && FindPathAfterExactMarker(body, pos, dataLen, ConnectedToMarker) is { } connectedTo)
+                scan.PlatformLinks[instance] = connectedTo;
+
             pos += dataLen;
             if (saveVer >= 53)                                        // [>=53] per-object version data
             {
@@ -211,6 +278,43 @@ public static class SatisfactorySaveReader
     {
         var at = IndexOf(body, marker, start, start + len);
         return at < 0 ? null : FindInstancePath(body, at + marker.Length, start + len);
+    }
+
+    /// <summary>The first instance path after the *exactly*-named property
+    /// <paramref name="marker"/> (FString framing: length prefix and NUL terminator — so
+    /// "mStation" never matches "mStationName") within one object's data blob, or null.</summary>
+    private static string? FindPathAfterExactMarker(byte[] body, int start, int len, byte[] marker)
+    {
+        var end = start + len;
+        var pos = start;
+        while (true)
+        {
+            var at = IndexOf(body, marker, pos, end);
+            if (at < 4) return null;
+            pos = at + marker.Length;
+            if (BitConverter.ToInt32(body, at - 4) != marker.Length + 1) continue; // FString length
+            if (body[at + marker.Length] != 0) continue;                           // exact name
+            return FindInstancePath(body, at + marker.Length + 1, end);
+        }
+    }
+
+    /// <summary>Every instance-path string (printable run of ≥8 chars containing ':' and '.')
+    /// inside one object's data blob that contains <paramref name="token"/>, in blob order —
+    /// how a timetable's stop references are collected.</summary>
+    private static List<string> CollectInstancePaths(byte[] body, int start, int len, string token)
+    {
+        var results = new List<string>();
+        var run = new System.Text.StringBuilder();
+        var end = Math.Min(start + len, body.Length);
+        for (var i = start; i <= end; i++)
+        {
+            if (i < end && body[i] is >= 32 and < 127) { run.Append((char)body[i]); continue; }
+            if (run.Length >= 8 && run.ToString() is var s && s.Contains(':') && s.Contains('.')
+                && s.Contains(token, StringComparison.Ordinal))
+                results.Add(s);
+            run.Clear();
+        }
+        return results;
     }
 
     /// <summary>The first instance-path string (a printable run of ≥8 chars containing ':' and
@@ -256,6 +360,8 @@ public static class SatisfactorySaveReader
     private static readonly byte[] PathNetworkIdMarker = Encoding.ASCII.GetBytes("mPathNetworkID");
     private static readonly byte[] PairedStationMarker = Encoding.ASCII.GetBytes("mPairedStation");
     private static readonly byte[] CurrentRecipeMarker = Encoding.ASCII.GetBytes("mCurrentRecipe");
+    private static readonly byte[] StationMarker = Encoding.ASCII.GetBytes("mStation");
+    private static readonly byte[] ConnectedToMarker = Encoding.ASCII.GetBytes("mConnectedTo");
 
     /// <summary>The machine's <c>mCurrentRecipe</c> stem inside one object's data blob, or null.
     /// Same asset-path extraction the whole-body <see cref="ScanRecipeStems"/> uses, but attributed
@@ -509,13 +615,14 @@ public static class SatisfactorySaveReader
             ResourceNodes = ReadResourceNodesFromBody(body),
             RecipeStems = ScanRecipeStems(body),
             ComponentLinks = scan.Links,
-            VehicleRoutes = BuildVehicleRoutes(scan),
+            VehicleRoutes = BuildVehicleRoutes(scan, buildings),
         };
     }
 
     /// <summary>Vehicle circuits from the scan: truck stations grouped by road network, drone
-    /// ports by their mutual pairing.</summary>
-    private static List<SaveVehicleRoute> BuildVehicleRoutes(ObjectDataScan scan)
+    /// ports by their mutual pairing, train freight platforms by timetable.</summary>
+    private static List<SaveVehicleRoute> BuildVehicleRoutes(
+        ObjectDataScan scan, IReadOnlyList<SaveBuilding> buildings)
     {
         var routes = new List<SaveVehicleRoute>();
         foreach (var network in scan.StationNetworks.GroupBy(kv => kv.Value).OrderBy(g => g.Key))
@@ -530,8 +637,119 @@ public static class SatisfactorySaveReader
             if (seenPairs.Add(pair))
                 routes.Add(new SaveVehicleRoute(Model.LogisticsKind.Drone, [pair.Item1, pair.Item2]));
         }
+        AddTrainRoutes(scan, buildings, routes);
         return routes;
     }
+
+    // ---------------------------------------------------------- train routes
+
+    private const string TrainStationClass = "Build_TrainStation_C";
+
+    /// <summary>Freight platform classes (the solid docking station and its liquid variant
+    /// share the prefix). Cargo flows through these — the station itself has no belt ports.</summary>
+    private const string CargoPlatformClassPrefix = "Build_TrainDockingStation";
+
+    /// <summary>How close (cm) a chain-less freight platform must be to a station to be treated
+    /// as belonging to it — the spatial fallback when no platform-connection data exists.</summary>
+    private const double PlatformSnapRadiusCm = 10_000; // 100 m
+
+    /// <summary>Train circuits: per timetable, resolve each stop's identifier to its station
+    /// actor and each station to the freight platforms chained onto it, then emit the platforms
+    /// of all resolved stops as one route — the platforms carry the belts, so
+    /// <see cref="SaveImport"/> wires cargo through them exactly like truck stations. A stop
+    /// whose identifier or station doesn't resolve is skipped; a route forms when platforms at
+    /// ≥2 distinct stations remain.</summary>
+    private static void AddTrainRoutes(
+        ObjectDataScan scan, IReadOnlyList<SaveBuilding> buildings, List<SaveVehicleRoute> routes)
+    {
+        if (scan.TimetableStops.Count == 0) return;
+        var platformsByStation = PlatformsByStation(scan, buildings);
+        foreach (var (_, stops) in scan.TimetableStops.OrderBy(kv => kv.Key, StringComparer.Ordinal))
+        {
+            var stations = new List<string>();
+            foreach (var stop in stops)
+                if (scan.StationOfIdentifier.TryGetValue(stop, out var station)
+                    && !stations.Contains(station))
+                    stations.Add(station);
+
+            var platforms = new List<string>();
+            var stationsWithPlatforms = 0;
+            foreach (var station in stations)
+            {
+                if (!platformsByStation.TryGetValue(station, out var mine) || mine.Count == 0) continue;
+                stationsWithPlatforms++;
+                platforms.AddRange(mine);
+            }
+            if (stationsWithPlatforms >= 2)
+                routes.Add(new SaveVehicleRoute(Model.LogisticsKind.Train, platforms));
+        }
+    }
+
+    /// <summary>Station actor → the freight platforms that belong to it. Primary mechanism: the
+    /// platform-connection chain (multi-source BFS over the owner-level adjacency, so a platform
+    /// belongs to its hop-nearest station even when two stations sit on one chain). Fallback for
+    /// platforms with no connection data at all: the nearest station within
+    /// <see cref="PlatformSnapRadiusCm"/>, from the actors' world positions.</summary>
+    private static Dictionary<string, List<string>> PlatformsByStation(
+        ObjectDataScan scan, IReadOnlyList<SaveBuilding> buildings)
+    {
+        var adj = new Dictionary<string, HashSet<string>>(StringComparer.Ordinal);
+        void Link(string a, string b)
+        {
+            if (a == b) return;
+            (adj.TryGetValue(a, out var sa) ? sa : adj[a] = new(StringComparer.Ordinal)).Add(b);
+            (adj.TryGetValue(b, out var sb) ? sb : adj[b] = new(StringComparer.Ordinal)).Add(a);
+        }
+        foreach (var (from, to) in scan.PlatformLinks)
+            Link(SaveConnectionTracer.MachineOf(from), SaveConnectionTracer.MachineOf(to));
+
+        var result = new Dictionary<string, List<string>>(StringComparer.Ordinal);
+        void Assign(string station, string platform)
+            => (result.TryGetValue(station, out var list) ? list : result[station] = []).Add(platform);
+
+        // Multi-source BFS from every station on the chain graph.
+        var reached = new Dictionary<string, string>(StringComparer.Ordinal); // member → its station
+        var queue = new Queue<string>();
+        foreach (var station in adj.Keys.Where(k => SaveConnectionTracer.ClassOf(k) == TrainStationClass))
+        {
+            reached[station] = station;
+            queue.Enqueue(station);
+        }
+        while (queue.Count > 0)
+        {
+            var node = queue.Dequeue();
+            foreach (var next in adj[node])
+            {
+                if (!reached.TryAdd(next, reached[node])) continue;
+                queue.Enqueue(next);
+                if (IsCargoPlatform(next)) Assign(reached[next], next);
+            }
+        }
+
+        // Spatial fallback for platforms that have no chain data (framing absent or unparsed).
+        var stations = buildings.Where(b => b.ClassName == TrainStationClass).ToList();
+        foreach (var b in buildings)
+        {
+            if (!b.ClassName.StartsWith(CargoPlatformClassPrefix, StringComparison.Ordinal)) continue;
+            if (adj.ContainsKey(b.Instance)) continue; // the chain already decided (or isolated)
+            SaveBuilding? best = null;
+            var bestDistance = PlatformSnapRadiusCm;
+            foreach (var station in stations)
+            {
+                var distance = Math.Sqrt(
+                    (station.X - b.X) * (station.X - b.X) + (station.Y - b.Y) * (station.Y - b.Y));
+                if (distance >= bestDistance) continue;
+                bestDistance = distance;
+                best = station;
+            }
+            if (best is not null) Assign(best.Instance, b.Instance);
+        }
+        return result;
+    }
+
+    private static bool IsCargoPlatform(string instance)
+        => SaveConnectionTracer.ClassOf(instance)
+            .StartsWith(CargoPlatformClassPrefix, StringComparison.Ordinal);
 
     /// <summary>A serialized clock float as an exact fraction, rounded at the game's clock
     /// precision (4 decimals of percent), so 0.333333343f reads back as exactly 33.3333%.</summary>

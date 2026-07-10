@@ -7,4 +7,8 @@
 		<RootNamespace>Ficsit.Schematics.Core</RootNamespace>
 	</PropertyGroup>
 
+	<ItemGroup>
+		<InternalsVisibleTo Include="Ficsit.Schematics.Tests" />
+	</ItemGroup>
+
 </Project>

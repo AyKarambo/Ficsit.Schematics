@@ -22,5 +22,15 @@ public static class TestData
     public static string ReferenceSavePath =>
         Path.Combine(RepoRoot, "Ficsit.Schematics.Tests", "Fixtures", "reference-save.sfmd");
 
+    /// <summary>Real rail save (v60, build 491125): 21 named train stations, 9 timetabled
+    /// trains, 40 freight platforms — the train-import fixture.</summary>
+    public static string DuneDesertSavePath =>
+        Path.Combine(RepoRoot, "Ficsit.Schematics.Tests", "Resources", "dune_desert_240526-214024.sav");
+
+    /// <summary>Real rail-free save (471 machines, 3 truck routes) — the no-false-positives
+    /// regression fixture for the train import.</summary>
+    public static string RandomNodeSavePath =>
+        Path.Combine(RepoRoot, "Ficsit.Schematics.Tests", "Resources", "random.node_070626-181115.sav");
+
     public static GameDatabase Database => GameDataCatalog.Shared;
 }
