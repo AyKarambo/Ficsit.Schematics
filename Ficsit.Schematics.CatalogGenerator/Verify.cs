@@ -15,17 +15,24 @@ public static class Verify
 {
     public static int Run(CatalogModel model, IReadOnlyList<string> problems)
     {
-        var document = GameDataCatalog.BuildDocument();
+        var diffs = Collect(model, problems, GameDataCatalog.BuildDocument());
+        foreach (var diff in diffs) Console.WriteLine(diff);
+        Console.WriteLine($"--- {diffs.Count} difference(s).");
+        return diffs.Count == 0 ? 0 : 3;
+    }
+
+    /// <summary>Every difference between the derived model and <paramref name="document"/> —
+    /// empty when the compiled catalog matches the export (the oracle test asserts this).</summary>
+    public static List<string> Collect(
+        CatalogModel model, IReadOnlyList<string> problems, GameDataDocument document)
+    {
         var diffs = new List<string>();
         diffs.AddRange(problems.Select(p => $"problem: {p}"));
 
         CompareParts(model, document, diffs);
         CompareRecipes(model, document, diffs);
         CompareMachines(model, document, diffs);
-
-        foreach (var diff in diffs) Console.WriteLine(diff);
-        Console.WriteLine($"--- {diffs.Count} difference(s).");
-        return diffs.Count == 0 ? 0 : 3;
+        return diffs;
     }
 
     private static void CompareParts(CatalogModel model, GameDataDocument document, List<string> diffs)
