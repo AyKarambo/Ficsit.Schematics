@@ -615,13 +615,14 @@ public static class SatisfactorySaveReader
             ResourceNodes = ReadResourceNodesFromBody(body),
             RecipeStems = ScanRecipeStems(body),
             ComponentLinks = scan.Links,
-            VehicleRoutes = BuildVehicleRoutes(scan),
+            VehicleRoutes = BuildVehicleRoutes(scan, buildings),
         };
     }
 
     /// <summary>Vehicle circuits from the scan: truck stations grouped by road network, drone
-    /// ports by their mutual pairing.</summary>
-    private static List<SaveVehicleRoute> BuildVehicleRoutes(ObjectDataScan scan)
+    /// ports by their mutual pairing, train freight platforms by timetable.</summary>
+    private static List<SaveVehicleRoute> BuildVehicleRoutes(
+        ObjectDataScan scan, IReadOnlyList<SaveBuilding> buildings)
     {
         var routes = new List<SaveVehicleRoute>();
         foreach (var network in scan.StationNetworks.GroupBy(kv => kv.Value).OrderBy(g => g.Key))
@@ -636,8 +637,119 @@ public static class SatisfactorySaveReader
             if (seenPairs.Add(pair))
                 routes.Add(new SaveVehicleRoute(Model.LogisticsKind.Drone, [pair.Item1, pair.Item2]));
         }
+        AddTrainRoutes(scan, buildings, routes);
         return routes;
     }
+
+    // ---------------------------------------------------------- train routes
+
+    private const string TrainStationClass = "Build_TrainStation_C";
+
+    /// <summary>Freight platform classes (the solid docking station and its liquid variant
+    /// share the prefix). Cargo flows through these — the station itself has no belt ports.</summary>
+    private const string CargoPlatformClassPrefix = "Build_TrainDockingStation";
+
+    /// <summary>How close (cm) a chain-less freight platform must be to a station to be treated
+    /// as belonging to it — the spatial fallback when no platform-connection data exists.</summary>
+    private const double PlatformSnapRadiusCm = 10_000; // 100 m
+
+    /// <summary>Train circuits: per timetable, resolve each stop's identifier to its station
+    /// actor and each station to the freight platforms chained onto it, then emit the platforms
+    /// of all resolved stops as one route — the platforms carry the belts, so
+    /// <see cref="SaveImport"/> wires cargo through them exactly like truck stations. A stop
+    /// whose identifier or station doesn't resolve is skipped; a route forms when platforms at
+    /// ≥2 distinct stations remain.</summary>
+    private static void AddTrainRoutes(
+        ObjectDataScan scan, IReadOnlyList<SaveBuilding> buildings, List<SaveVehicleRoute> routes)
+    {
+        if (scan.TimetableStops.Count == 0) return;
+        var platformsByStation = PlatformsByStation(scan, buildings);
+        foreach (var (_, stops) in scan.TimetableStops.OrderBy(kv => kv.Key, StringComparer.Ordinal))
+        {
+            var stations = new List<string>();
+            foreach (var stop in stops)
+                if (scan.StationOfIdentifier.TryGetValue(stop, out var station)
+                    && !stations.Contains(station))
+                    stations.Add(station);
+
+            var platforms = new List<string>();
+            var stationsWithPlatforms = 0;
+            foreach (var station in stations)
+            {
+                if (!platformsByStation.TryGetValue(station, out var mine) || mine.Count == 0) continue;
+                stationsWithPlatforms++;
+                platforms.AddRange(mine);
+            }
+            if (stationsWithPlatforms >= 2)
+                routes.Add(new SaveVehicleRoute(Model.LogisticsKind.Train, platforms));
+        }
+    }
+
+    /// <summary>Station actor → the freight platforms that belong to it. Primary mechanism: the
+    /// platform-connection chain (multi-source BFS over the owner-level adjacency, so a platform
+    /// belongs to its hop-nearest station even when two stations sit on one chain). Fallback for
+    /// platforms with no connection data at all: the nearest station within
+    /// <see cref="PlatformSnapRadiusCm"/>, from the actors' world positions.</summary>
+    private static Dictionary<string, List<string>> PlatformsByStation(
+        ObjectDataScan scan, IReadOnlyList<SaveBuilding> buildings)
+    {
+        var adj = new Dictionary<string, HashSet<string>>(StringComparer.Ordinal);
+        void Link(string a, string b)
+        {
+            if (a == b) return;
+            (adj.TryGetValue(a, out var sa) ? sa : adj[a] = new(StringComparer.Ordinal)).Add(b);
+            (adj.TryGetValue(b, out var sb) ? sb : adj[b] = new(StringComparer.Ordinal)).Add(a);
+        }
+        foreach (var (from, to) in scan.PlatformLinks)
+            Link(SaveConnectionTracer.MachineOf(from), SaveConnectionTracer.MachineOf(to));
+
+        var result = new Dictionary<string, List<string>>(StringComparer.Ordinal);
+        void Assign(string station, string platform)
+            => (result.TryGetValue(station, out var list) ? list : result[station] = []).Add(platform);
+
+        // Multi-source BFS from every station on the chain graph.
+        var reached = new Dictionary<string, string>(StringComparer.Ordinal); // member → its station
+        var queue = new Queue<string>();
+        foreach (var station in adj.Keys.Where(k => SaveConnectionTracer.ClassOf(k) == TrainStationClass))
+        {
+            reached[station] = station;
+            queue.Enqueue(station);
+        }
+        while (queue.Count > 0)
+        {
+            var node = queue.Dequeue();
+            foreach (var next in adj[node])
+            {
+                if (!reached.TryAdd(next, reached[node])) continue;
+                queue.Enqueue(next);
+                if (IsCargoPlatform(next)) Assign(reached[next], next);
+            }
+        }
+
+        // Spatial fallback for platforms that have no chain data (framing absent or unparsed).
+        var stations = buildings.Where(b => b.ClassName == TrainStationClass).ToList();
+        foreach (var b in buildings)
+        {
+            if (!b.ClassName.StartsWith(CargoPlatformClassPrefix, StringComparison.Ordinal)) continue;
+            if (adj.ContainsKey(b.Instance)) continue; // the chain already decided (or isolated)
+            SaveBuilding? best = null;
+            var bestDistance = PlatformSnapRadiusCm;
+            foreach (var station in stations)
+            {
+                var distance = Math.Sqrt(
+                    (station.X - b.X) * (station.X - b.X) + (station.Y - b.Y) * (station.Y - b.Y));
+                if (distance >= bestDistance) continue;
+                bestDistance = distance;
+                best = station;
+            }
+            if (best is not null) Assign(best.Instance, b.Instance);
+        }
+        return result;
+    }
+
+    private static bool IsCargoPlatform(string instance)
+        => SaveConnectionTracer.ClassOf(instance)
+            .StartsWith(CargoPlatformClassPrefix, StringComparison.Ordinal);
 
     /// <summary>A serialized clock float as an exact fraction, rounded at the game's clock
     /// precision (4 decimals of percent), so 0.333333343f reads back as exactly 33.3333%.</summary>
