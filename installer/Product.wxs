@@ -17,7 +17,11 @@
 	         Scope="perUser"
 	         Language="1033">
 
-		<MajorUpgrade DowngradeErrorMessage="A newer version of [ProductName] is already installed." />
+		<!-- AllowSameVersionUpgrades: prereleases of one triple (0.2.0-rc.1 -> -rc.2) share
+		     ProductVersion 0.2.0; without it the second install would register a second
+		     product instead of upgrade-replacing the first. -->
+		<MajorUpgrade AllowSameVersionUpgrades="yes"
+		              DowngradeErrorMessage="A newer version of [ProductName] is already installed." />
 		<MediaTemplate EmbedCab="yes" />
 
 		<Icon Id="AppIcon.ico" SourceFile="$(var.IconPath)" />
