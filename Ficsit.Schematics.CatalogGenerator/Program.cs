@@ -27,6 +27,12 @@ public static class Program
             case "--stats":
                 PrintStats(export);
                 return 0;
+            case "--verify":
+            {
+                var derivation = new Derivation.CatalogDerivation(export);
+                var model = derivation.Derive();
+                return Verify.Run(model, derivation.Problems);
+            }
             default:
                 Console.Error.WriteLine($"Unknown mode '{mode}'. Use --stats, --verify or --write.");
                 return 2;
